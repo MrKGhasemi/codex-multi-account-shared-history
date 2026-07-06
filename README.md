@@ -105,7 +105,7 @@ On Windows, the links are directory Junctions. On Linux, they are symbolic links
 
 # Windows guide
 
-## Windows prerequisites
+### Windows prerequisites
 
 Check that Codex CLI exists:
 
@@ -125,7 +125,7 @@ Then close PowerShell, reopen it, and test again:
 codex --version
 ```
 
-## Step 1: install the profile switcher
+### Step 1: install the profile switcher
 
 From the repo folder:
 
@@ -159,7 +159,7 @@ Reload your PowerShell profile:
 
 Or simply close PowerShell and open it again.
 
-## Step 2: login to account 1
+### Step 2: login to account 1
 
 ```powershell
 $env:CODEX_HOME="$env:USERPROFILE\.codex-plus-1"
@@ -175,7 +175,7 @@ $env:CODEX_HOME="$env:USERPROFILE\.codex-plus-1"
 codex login
 ```
 
-## Step 3: login to account 2
+### Step 3: login to account 2
 
 ```powershell
 $env:CODEX_HOME="$env:USERPROFILE\.codex-plus-2"
@@ -184,7 +184,7 @@ codex login --device-auth
 
 Complete the browser/device-code login for account 2.
 
-## Step 4: check both accounts
+### Step 4: check both accounts
 
 ```powershell
 codex1 login status
@@ -197,7 +197,7 @@ Expected result:
 Logged in using ChatGPT
 ```
 
-## Step 5: enable live shared history
+### Step 5: enable live shared history
 
 Close all Codex surfaces first:
 
@@ -213,7 +213,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\use-live-shared-histo
 
 This backs up your existing session folders, merges existing sessions into the shared folder, and replaces the per-profile session folders with Junctions.
 
-## Step 6: use it
+### Step 6: use it
 
 Account 1:
 
@@ -252,7 +252,7 @@ The Linux setup is the same idea:
 ~/.codex-shared-history = shared sessions
 ```
 
-## Linux prerequisites
+### Linux prerequisites
 
 Check Codex CLI:
 
@@ -272,7 +272,7 @@ Then restart your shell or refresh PATH and test:
 codex --version
 ```
 
-## Step 1: install shell functions
+### Step 1: install shell functions
 
 From the repo folder:
 
@@ -286,26 +286,26 @@ Load the functions now:
 source "$HOME/.codex-switcher/codex-functions.sh"
 ```
 
-## Step 2: login to account 1
+### Step 2: login to account 1
 
 ```bash
 CODEX_HOME="$HOME/.codex-plus-1" codex login --device-auth
 ```
 
-## Step 3: login to account 2
+### Step 3: login to account 2
 
 ```bash
 CODEX_HOME="$HOME/.codex-plus-2" codex login --device-auth
 ```
 
-## Step 4: check both accounts
+### Step 4: check both accounts
 
 ```bash
 codex1 login status
 codex2 login status
 ```
 
-## Step 5: enable live shared history
+### Step 5: enable live shared history
 
 Close all Codex CLI/UI/IDE sessions first, then run:
 
@@ -313,7 +313,7 @@ Close all Codex CLI/UI/IDE sessions first, then run:
 bash ./scripts/linux/use-live-shared-history.sh
 ```
 
-## Step 6: use it
+### Step 6: use it
 
 ```bash
 codex1 resume --all
@@ -358,38 +358,38 @@ Because the profiles share the same live session files, two writers can conflict
 
 # Command reference
 
-## Start a new Codex session with account 1
+### Start a new Codex session with account 1
 
 ```bash
 codex1
 ```
 
-## Start a new Codex session with account 2
+### Start a new Codex session with account 2
 
 ```bash
 codex2
 ```
 
-## Resume any conversation from account 1
+### Resume any conversation from account 1
 
 ```bash
 codex1 resume --all
 ```
 
-## Resume any conversation from account 2
+### Resume any conversation from account 2
 
 ```bash
 codex2 resume --all
 ```
 
-## Resume the last conversation
+### Resume the last conversation
 
 ```bash
 codex1 resume --last
 codex2 resume --last
 ```
 
-## Check login status
+### Check login status
 
 ```bash
 codex1 login status
@@ -397,7 +397,7 @@ codex2 login status
 codexui login status
 ```
 
-## Login again without logging out
+### Login again without logging out
 
 ```bash
 CODEX_HOME="$HOME/.codex-plus-1" codex login --device-auth
@@ -411,7 +411,7 @@ $env:CODEX_HOME="$env:USERPROFILE\.codex-plus-1"; codex login --device-auth
 $env:CODEX_HOME="$env:USERPROFILE\.codex-plus-2"; codex login --device-auth
 ```
 
-## Delete a conversation
+### Delete a conversation
 
 Inside Codex CLI, use `/delete` if available for the selected conversation, or use the CLI delete command with a session id/name:
 
@@ -425,7 +425,7 @@ Because the session folder is shared live, deletion should apply to all profiles
 
 # Error handling
 
-## Error: `codex : The term 'codex' is not recognized`
+### Error: `codex : The term 'codex' is not recognized`
 
 Meaning: Windows cannot find Codex CLI.
 
@@ -441,7 +441,7 @@ Then close PowerShell, open it again, and test:
 codex --version
 ```
 
-## Error: `Enable device code authorization for Codex in ChatGPT Security Settings`
+### Error: `Enable device code authorization for Codex in ChatGPT Security Settings`
 
 Meaning: the account has not enabled device-code login for Codex.
 
@@ -462,7 +462,7 @@ or for account 2:
 $env:CODEX_HOME="$env:USERPROFILE\.codex-plus-2"; codex login --device-auth
 ```
 
-## Error: `Cannot overwrite variable Home because it is read-only or constant`
+### Error: `Cannot overwrite variable Home because it is read-only or constant`
 
 Meaning: an old PowerShell function used `$Home` as a parameter name. PowerShell treats `$HOME` and `$Home` as the same read-only variable.
 
@@ -475,7 +475,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\remove-old-copy-sync-
 
 The current scripts use `$CodexHome`, not `$Home`.
 
-## Error: `codex1 : The term 'codex1' is not recognized`
+### Error: `codex1 : The term 'codex1' is not recognized`
 
 Meaning: your PowerShell profile has not been loaded or the installer did not run.
 
@@ -492,7 +492,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-codex-profile
 . $PROFILE
 ```
 
-## Error: `running scripts is disabled on this system`
+### Error: `running scripts is disabled on this system`
 
 Meaning: PowerShell execution policy blocks scripts.
 
@@ -508,7 +508,7 @@ Or allow local scripts for your user:
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
-## Error: deleted conversations come back
+### Error: deleted conversations come back
 
 Meaning: you are still using copy/merge sync, not live shared folders.
 
@@ -533,7 +533,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\use-live-shared-histo
 codexsharedstatus
 ```
 
-## Error: Windows cannot create a Junction
+### Error: Windows cannot create a Junction
 
 Possible causes:
 
@@ -547,7 +547,7 @@ Fix:
 2. Open PowerShell normally and run again.
 3. If it still fails, try PowerShell as Administrator.
 
-## Error: Linux `ln: failed to create symbolic link`
+### Error: Linux `ln: failed to create symbolic link`
 
 Possible causes:
 
@@ -567,7 +567,7 @@ Close Codex, then run:
 bash ./scripts/linux/use-live-shared-history.sh
 ```
 
-## Error: `codex resume -all` does not work
+### Error: `codex resume -all` does not work
 
 Use two dashes:
 
@@ -582,7 +582,7 @@ Not:
 codex1 resume -all
 ```
 
-## Problem: UI app still does not switch accounts
+### Problem: UI app still does not switch accounts
 
 That is expected. This repo switches CLI accounts. Codex desktop account switching is not currently supported. Use:
 
