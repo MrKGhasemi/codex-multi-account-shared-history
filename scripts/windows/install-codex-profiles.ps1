@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-  Installs PowerShell helper commands for running multiple Codex ChatGPT accounts.
+  Installs PowerShell helper commands for running four Codex ChatGPT accounts.
 
 .DESCRIPTION
-  Adds codex1, codex2, codexui, and codexsharedstatus functions to your PowerShell profile.
+  Adds codex1, codex2, codex3, codex4, codexui, and codexsharedstatus functions to your PowerShell profile.
   Each command runs Codex with a different CODEX_HOME, so auth.json stays separate per account.
 
   This script does NOT copy, sync, or commit auth.json.
@@ -22,16 +22,19 @@ if (Test-Path $ProfilePath) {
 $CodexUiHome     = Join-Path $env:USERPROFILE ".codex"
 $Codex1Home      = Join-Path $env:USERPROFILE ".codex-plus-1"
 $Codex2Home      = Join-Path $env:USERPROFILE ".codex-plus-2"
+$Codex3Home      = Join-Path $env:USERPROFILE ".codex-plus-3"
+$Codex4Home      = Join-Path $env:USERPROFILE ".codex-plus-4"
 $CodexSharedHome = Join-Path $env:USERPROFILE ".codex-shared-history"
 
-foreach ($dir in @($CodexUiHome, $Codex1Home, $Codex2Home, $CodexSharedHome)) {
+foreach ($dir in @($CodexUiHome, $Codex1Home, $Codex2Home, $Codex3Home, $Codex4Home, $CodexSharedHome)) {
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
 }
 
-# Force file-based credentials for the two CLI account profiles so each profile has its own auth.json.
+# Force file-based credentials for the four CLI profiles so each gets its own auth.json.
 # The desktop/UI profile is left untouched because the app may use its default credential mode.
-Set-Content -Path (Join-Path $Codex1Home "config.toml") -Value 'cli_auth_credentials_store = "file"' -Encoding UTF8
-Set-Content -Path (Join-Path $Codex2Home "config.toml") -Value 'cli_auth_credentials_store = "file"' -Encoding UTF8
+foreach ($profileHome in @($Codex1Home, $Codex2Home, $Codex3Home, $Codex4Home)) {
+    Set-Content -Path (Join-Path $profileHome "config.toml") -Value 'cli_auth_credentials_store = "file"' -Encoding UTF8
+}
 
 $Block = @'
 # >>> Codex multi-account shared-history switcher >>>
@@ -39,6 +42,8 @@ $Block = @'
 $global:CodexUiHome     = Join-Path $env:USERPROFILE ".codex"
 $global:Codex1Home      = Join-Path $env:USERPROFILE ".codex-plus-1"
 $global:Codex2Home      = Join-Path $env:USERPROFILE ".codex-plus-2"
+$global:Codex3Home      = Join-Path $env:USERPROFILE ".codex-plus-3"
+$global:Codex4Home      = Join-Path $env:USERPROFILE ".codex-plus-4"
 $global:CodexSharedHome = Join-Path $env:USERPROFILE ".codex-shared-history"
 
 function Invoke-CodexWithHome {
@@ -73,6 +78,14 @@ function codex2 {
     Invoke-CodexWithHome -CodexHome $global:Codex2Home @args
 }
 
+function codex3 {
+    Invoke-CodexWithHome -CodexHome $global:Codex3Home @args
+}
+
+function codex4 {
+    Invoke-CodexWithHome -CodexHome $global:Codex4Home @args
+}
+
 function codexui {
     Invoke-CodexWithHome -CodexHome $global:CodexUiHome @args
 }
@@ -82,6 +95,8 @@ function codexsharedstatus {
         @{ Name = "UI";      Path = $global:CodexUiHome },
         @{ Name = "codex1";  Path = $global:Codex1Home },
         @{ Name = "codex2";  Path = $global:Codex2Home },
+        @{ Name = "codex3";  Path = $global:Codex3Home },
+        @{ Name = "codex4";  Path = $global:Codex4Home },
         @{ Name = "shared";  Path = $global:CodexSharedHome }
     )
 
@@ -122,15 +137,19 @@ Set-Content -Path $ProfilePath -Value ($Content + "`r`n`r`n" + $Block + "`r`n") 
 . $ProfilePath
 
 Write-Host ""
-Write-Host "Installed Codex profile switcher."
+Write-Host "Installed Codex profile switcher for four accounts."
 Write-Host "PowerShell profile: $ProfilePath"
 Write-Host ""
 Write-Host "Next commands:"
 Write-Host '  $env:CODEX_HOME="$env:USERPROFILE\.codex-plus-1"; codex login --device-auth'
 Write-Host '  $env:CODEX_HOME="$env:USERPROFILE\.codex-plus-2"; codex login --device-auth'
+Write-Host '  $env:CODEX_HOME="$env:USERPROFILE\.codex-plus-3"; codex login --device-auth'
+Write-Host '  $env:CODEX_HOME="$env:USERPROFILE\.codex-plus-4"; codex login --device-auth'
 Write-Host ""
 Write-Host "Usage after login:"
 Write-Host "  codex1 resume --all"
 Write-Host "  codex2 resume --all"
+Write-Host "  codex3 resume --all"
+Write-Host "  codex4 resume --all"
 Write-Host "  codexui resume --all"
 Write-Host "  codexsharedstatus"

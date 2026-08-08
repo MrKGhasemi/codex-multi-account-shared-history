@@ -1,212 +1,148 @@
-# Copy-paste commands
+# Copy-paste commands for four Codex accounts
 
-This file is the short command-only version of the setup.
+## Windows
 
----
-
-# Windows
-
-## 1. Install Codex CLI if missing
+Install Codex CLI if missing:
 
 ```powershell
 npm install -g @openai/codex
 codex --version
 ```
 
-## 2. Install the profile switcher
-
-Run from the repo folder:
+Install or upgrade the switcher:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-codex-profiles.ps1
 . $PROFILE
 ```
 
-## 3. Login account 1
+Log in:
 
 ```powershell
-$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-1"
-codex login --device-auth
+$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-1"; codex login --device-auth
+$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-2"; codex login --device-auth
+$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-3"; codex login --device-auth
+$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-4"; codex login --device-auth
 ```
 
-## 4. Login account 2
-
-```powershell
-$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-2"
-codex login --device-auth
-```
-
-## 5. Check logins
+Check logins:
 
 ```powershell
 codex1 login status
 codex2 login status
+codex3 login status
+codex4 login status
 ```
 
-## 6. Enable shared live history
-
-Close Codex CLI, Codex UI, and IDE extensions first.
+Enable shared live history:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\use-live-shared-history.ps1
 ```
 
-## 7. Use account 1
+Use profiles:
 
 ```powershell
 codex1 resume --all
-```
-
-## 8. Switch to account 2
-
-Exit Codex first, then:
-
-```powershell
 codex2 resume --all
-```
-
-## 9. Use UI/default profile from CLI
-
-```powershell
+codex3 resume --all
+codex4 resume --all
 codexui resume --all
 ```
 
-## 10. Check folder/link status
+Inspect links:
 
 ```powershell
 codexsharedstatus
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\check-codex-profiles.ps1
 ```
 
-## 11. Fix old `$Home` error
+Remove an old copy-sync block:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\remove-old-copy-sync-block.ps1
 . $PROFILE
 ```
 
-## 12. Fix script execution policy for one run
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-codex-profiles.ps1
-```
-
 ---
 
-# Linux
+## Linux
 
-## 1. Install Codex CLI if missing
+Install Codex CLI if missing:
 
 ```bash
 npm install -g @openai/codex
 codex --version
 ```
 
-## 2. Install shell functions
+Install or upgrade the switcher:
 
 ```bash
 bash ./scripts/linux/install-codex-profiles.sh
 source "$HOME/.codex-switcher/codex-functions.sh"
 ```
 
-## 3. Login account 1
+Log in:
 
 ```bash
 CODEX_HOME="$HOME/.codex-plus-1" codex login --device-auth
-```
-
-## 4. Login account 2
-
-```bash
 CODEX_HOME="$HOME/.codex-plus-2" codex login --device-auth
+CODEX_HOME="$HOME/.codex-plus-3" codex login --device-auth
+CODEX_HOME="$HOME/.codex-plus-4" codex login --device-auth
 ```
 
-## 5. Check logins
+Check logins:
 
 ```bash
 codex1 login status
 codex2 login status
+codex3 login status
+codex4 login status
 ```
 
-## 6. Enable shared live history
-
-Close Codex CLI/UI/IDE first.
+Enable shared live history:
 
 ```bash
 bash ./scripts/linux/use-live-shared-history.sh
 ```
 
-## 7. Use account 1
+Use profiles:
 
 ```bash
 codex1 resume --all
-```
-
-## 8. Switch to account 2
-
-Exit Codex first, then:
-
-```bash
 codex2 resume --all
-```
-
-## 9. Use default/UI profile from CLI
-
-```bash
+codex3 resume --all
+codex4 resume --all
 codexui resume --all
 ```
 
-## 10. Check folder/link status
+Inspect links:
 
 ```bash
 codexsharedstatus
+bash ./scripts/linux/check-codex-profiles.sh
 ```
 
 ---
 
-# Common commands
+## Common commands
 
-## Resume last session
-
-```bash
-codex1 resume --last
-codex2 resume --last
-```
-
-## Start new session
+Start new sessions:
 
 ```bash
 codex1
 codex2
+codex3
+codex4
 ```
 
-## Delete session by id/name
+Resume last sessions:
 
 ```bash
-codex delete <SESSION_ID_OR_NAME>
+codex1 resume --last
+codex2 resume --last
+codex3 resume --last
+codex4 resume --last
 ```
 
-## Check profile paths
-
-Windows:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\check-codex-profiles.ps1
-```
-
-Linux:
-
-```bash
-bash ./scripts/linux/check-codex-profiles.sh
-```
-
-## Never run these unless you intentionally want to remove login credentials
-
-```bash
-codex logout
-```
-
-Do not delete or commit:
-
-```text
-auth.json
-```
+Never delete or commit any profile’s `auth.json` unless you intentionally want to remove credentials.

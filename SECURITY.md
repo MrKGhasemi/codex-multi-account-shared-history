@@ -1,38 +1,36 @@
 # Security Policy
 
-This repository is designed to avoid sharing authentication files.
+This repository separates authentication for four Codex CLI accounts and never intentionally shares authentication files.
 
 ## Sensitive files
 
-Codex may store credentials in:
-
-```text
-auth.json
-```
-
-Common locations:
+Codex credentials may be stored in `auth.json` at these locations:
 
 ```text
 ~/.codex/auth.json
 ~/.codex-plus-1/auth.json
 ~/.codex-plus-2/auth.json
+~/.codex-plus-3/auth.json
+~/.codex-plus-4/auth.json
 ```
 
-On Windows:
+Windows equivalents:
 
 ```text
 %USERPROFILE%\.codex\auth.json
 %USERPROFILE%\.codex-plus-1\auth.json
 %USERPROFILE%\.codex-plus-2\auth.json
+%USERPROFILE%\.codex-plus-3\auth.json
+%USERPROFILE%\.codex-plus-4\auth.json
 ```
 
-Treat these files like passwords. They may contain access tokens.
+Treat every `auth.json` like a password. It may contain access tokens.
 
-## What the scripts do not do
+## Script boundaries
 
 The scripts do not intentionally copy, link, sync, print, or commit `auth.json`.
 
-The scripts only work with:
+They work only with:
 
 ```text
 sessions/
@@ -41,9 +39,15 @@ history.jsonl
 config.toml
 ```
 
-`config.toml` is used to tell Codex CLI to store each account's credentials inside that account's own `CODEX_HOME`.
+Each of the four CLI profile directories gets this configuration:
 
-## Before publishing your repo
+```toml
+cli_auth_credentials_store = "file"
+```
+
+That keeps each login inside its own `CODEX_HOME`.
+
+## Before publishing
 
 Run:
 
@@ -51,22 +55,18 @@ Run:
 git status --ignored
 ```
 
-Make sure none of these appear as tracked files:
+Confirm these are not tracked:
 
 ```text
 auth.json
 .codex/
 .codex-plus-1/
 .codex-plus-2/
+.codex-plus-3/
+.codex-plus-4/
 .codex-shared-history/
 *.backup
 *.bak-*
 ```
 
-## Device code safety
-
-Device codes are temporary login secrets. Do not post them in public issues, screenshots, tickets, or chat.
-
-## MFA
-
-This setup does not disable MFA. Keep Google Authenticator or any MFA method enabled.
+Do not post device codes, access tokens, authentication files, or screenshots containing them.

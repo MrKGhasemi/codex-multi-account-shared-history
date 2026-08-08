@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Installs shell helper commands for multiple Codex ChatGPT accounts on Linux/macOS-like shells.
+# Installs shell helper commands for four Codex ChatGPT accounts on Linux/macOS-like shells.
 # It creates:
 #   codex1  -> CODEX_HOME=$HOME/.codex-plus-1
 #   codex2  -> CODEX_HOME=$HOME/.codex-plus-2
+#   codex3  -> CODEX_HOME=$HOME/.codex-plus-3
+#   codex4  -> CODEX_HOME=$HOME/.codex-plus-4
 #   codexui -> CODEX_HOME=$HOME/.codex
 #
 # This script does NOT copy, sync, or commit auth.json.
@@ -12,20 +14,34 @@ set -euo pipefail
 CODEX_UI_HOME="$HOME/.codex"
 CODEX1_HOME="$HOME/.codex-plus-1"
 CODEX2_HOME="$HOME/.codex-plus-2"
+CODEX3_HOME="$HOME/.codex-plus-3"
+CODEX4_HOME="$HOME/.codex-plus-4"
 CODEX_SHARED_HOME="$HOME/.codex-shared-history"
 SWITCHER_DIR="$HOME/.codex-switcher"
 FUNCTIONS_FILE="$SWITCHER_DIR/codex-functions.sh"
 
-mkdir -p "$CODEX_UI_HOME" "$CODEX1_HOME" "$CODEX2_HOME" "$CODEX_SHARED_HOME" "$SWITCHER_DIR"
-printf '%s\n' 'cli_auth_credentials_store = "file"' > "$CODEX1_HOME/config.toml"
-printf '%s\n' 'cli_auth_credentials_store = "file"' > "$CODEX2_HOME/config.toml"
+mkdir -p \
+  "$CODEX_UI_HOME" \
+  "$CODEX1_HOME" \
+  "$CODEX2_HOME" \
+  "$CODEX3_HOME" \
+  "$CODEX4_HOME" \
+  "$CODEX_SHARED_HOME" \
+  "$SWITCHER_DIR"
 
-cat > "$FUNCTIONS_FILE" <<'EOF'
+# Keep credentials in each CLI profile's own CODEX_HOME.
+for profile_home in "$CODEX1_HOME" "$CODEX2_HOME" "$CODEX3_HOME" "$CODEX4_HOME"; do
+  printf '%s\n' 'cli_auth_credentials_store = "file"' > "$profile_home/config.toml"
+done
+
+cat > "$FUNCTIONS_FILE" <<'FUNCTIONS_EOF'
 # >>> Codex multi-account shared-history switcher >>>
 
 export CODEX_UI_HOME="$HOME/.codex"
 export CODEX1_HOME="$HOME/.codex-plus-1"
 export CODEX2_HOME="$HOME/.codex-plus-2"
+export CODEX3_HOME="$HOME/.codex-plus-3"
+export CODEX4_HOME="$HOME/.codex-plus-4"
 export CODEX_SHARED_HOME="$HOME/.codex-shared-history"
 
 _codex_with_home() {
@@ -65,13 +81,28 @@ codex2() {
   _codex_with_home "$CODEX2_HOME" "$@"
 }
 
+codex3() {
+  _codex_with_home "$CODEX3_HOME" "$@"
+}
+
+codex4() {
+  _codex_with_home "$CODEX4_HOME" "$@"
+}
+
 codexui() {
   _codex_with_home "$CODEX_UI_HOME" "$@"
 }
 
 codexsharedstatus() {
   command -v codex >/dev/null 2>&1 && echo "codex: $(command -v codex)" || echo "codex: not found"
-  for entry in "UI:$CODEX_UI_HOME" "codex1:$CODEX1_HOME" "codex2:$CODEX2_HOME" "shared:$CODEX_SHARED_HOME"; do
+
+  for entry in \
+    "UI:$CODEX_UI_HOME" \
+    "codex1:$CODEX1_HOME" \
+    "codex2:$CODEX2_HOME" \
+    "codex3:$CODEX3_HOME" \
+    "codex4:$CODEX4_HOME" \
+    "shared:$CODEX_SHARED_HOME"; do
     name="${entry%%:*}"
     path="${entry#*:}"
     echo ""
@@ -92,7 +123,7 @@ codexsharedstatus() {
 }
 
 # <<< Codex multi-account shared-history switcher <<<
-EOF
+FUNCTIONS_EOF
 
 chmod 700 "$SWITCHER_DIR"
 chmod 600 "$FUNCTIONS_FILE"
@@ -116,7 +147,7 @@ case "${SHELL:-}" in
 esac
 
 echo ""
-echo "Installed Codex profile switcher."
+echo "Installed Codex profile switcher for four accounts."
 echo "Functions file: $FUNCTIONS_FILE"
 echo ""
 echo "Load it now with:"
@@ -125,9 +156,13 @@ echo ""
 echo "Next commands:"
 echo '  CODEX_HOME="$HOME/.codex-plus-1" codex login --device-auth'
 echo '  CODEX_HOME="$HOME/.codex-plus-2" codex login --device-auth'
+echo '  CODEX_HOME="$HOME/.codex-plus-3" codex login --device-auth'
+echo '  CODEX_HOME="$HOME/.codex-plus-4" codex login --device-auth'
 echo ""
 echo "Usage after login:"
 echo "  codex1 resume --all"
 echo "  codex2 resume --all"
+echo "  codex3 resume --all"
+echo "  codex4 resume --all"
 echo "  codexui resume --all"
 echo "  codexsharedstatus"

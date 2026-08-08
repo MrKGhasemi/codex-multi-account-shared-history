@@ -1,14 +1,16 @@
 <#
 .SYNOPSIS
-  Converts Codex UI, codex1, and codex2 profiles to use one shared live session store.
+  Converts Codex UI, codex1, codex2, codex3, and codex4 profiles to use one shared live session store.
 
 .DESCRIPTION
   Creates junctions:
     %USERPROFILE%\.codex\sessions              -> %USERPROFILE%\.codex-shared-history\sessions
     %USERPROFILE%\.codex-plus-1\sessions       -> %USERPROFILE%\.codex-shared-history\sessions
     %USERPROFILE%\.codex-plus-2\sessions       -> %USERPROFILE%\.codex-shared-history\sessions
+    %USERPROFILE%\.codex-plus-3\sessions       -> %USERPROFILE%\.codex-shared-history\sessions
+    %USERPROFILE%\.codex-plus-4\sessions       -> %USERPROFILE%\.codex-shared-history\sessions
 
-  Same for archived_sessions.
+  The same is done for archived_sessions.
   Creates a hardlink for history.jsonl unless -NoHistoryLink is passed.
 
   This script never links or copies auth.json.
@@ -37,6 +39,28 @@ function Invoke-RoboCopySafe {
     if ($code -gt 7) {
         throw "robocopy failed with exit code $code while copying '$Source' to '$Destination'"
     }
+}
+
+function Test-LinkTargetsDirectory {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][string]$ExpectedTarget
+    )
+
+    if (!(Test-Path $Path)) { return $false }
+
+    $item = Get-Item -LiteralPath $Path -Force
+    $isReparse = (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+    if (!$isReparse -or !$item.PSIsContainer -or !$item.Target) { return $false }
+
+    $target = @($item.Target)[0]
+    if (![System.IO.Path]::IsPathRooted($target)) {
+        $target = Join-Path $item.Parent.FullName $target
+    }
+
+    $actual = [System.IO.Path]::GetFullPath($target).TrimEnd('\')
+    $expected = [System.IO.Path]::GetFullPath($ExpectedTarget).TrimEnd('\')
+    return [string]::Equals($actual, $expected, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
 function Remove-PathWithoutFollowingJunction {
@@ -81,8 +105,10 @@ function Merge-JsonlUnique {
 $CodexUiHome     = Join-Path $env:USERPROFILE ".codex"
 $Codex1Home      = Join-Path $env:USERPROFILE ".codex-plus-1"
 $Codex2Home      = Join-Path $env:USERPROFILE ".codex-plus-2"
+$Codex3Home      = Join-Path $env:USERPROFILE ".codex-plus-3"
+$Codex4Home      = Join-Path $env:USERPROFILE ".codex-plus-4"
 $CodexSharedHome = Join-Path $env:USERPROFILE ".codex-shared-history"
-$Homes           = @($CodexUiHome, $Codex1Home, $Codex2Home)
+$Homes           = @($CodexUiHome, $Codex1Home, $Codex2Home, $Codex3Home, $Codex4Home)
 
 $BackupRoot = Join-Path $env:USERPROFILE ("codex-backup-before-shared-links-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 
@@ -110,14 +136,21 @@ foreach ($h in $Homes) {
     $archived = Join-Path $h "archived_sessions"
     $history  = Join-Path $h "history.jsonl"
 
+    $sharedSessions = Join-Path $CodexSharedHome "sessions"
+    $sharedArchived = Join-Path $CodexSharedHome "archived_sessions"
+
     if (Test-Path $sessions) {
-        Copy-Item $sessions $backupHome -Recurse -Force -ErrorAction SilentlyContinue
-        Invoke-RoboCopySafe -Source $sessions -Destination (Join-Path $CodexSharedHome "sessions")
+        if (!(Test-LinkTargetsDirectory -Path $sessions -ExpectedTarget $sharedSessions)) {
+            Copy-Item $sessions $backupHome -Recurse -Force -ErrorAction SilentlyContinue
+            Invoke-RoboCopySafe -Source $sessions -Destination $sharedSessions
+        }
     }
 
     if (Test-Path $archived) {
-        Copy-Item $archived $backupHome -Recurse -Force -ErrorAction SilentlyContinue
-        Invoke-RoboCopySafe -Source $archived -Destination (Join-Path $CodexSharedHome "archived_sessions")
+        if (!(Test-LinkTargetsDirectory -Path $archived -ExpectedTarget $sharedArchived)) {
+            Copy-Item $archived $backupHome -Recurse -Force -ErrorAction SilentlyContinue
+            Invoke-RoboCopySafe -Source $archived -Destination $sharedArchived
+        }
     }
 
     if (Test-Path $history) {
@@ -152,11 +185,13 @@ foreach ($h in $Homes) {
 }
 
 Write-Host ""
-Write-Host "Done. codex1, codex2, and codexui now share live sessions."
+Write-Host "Done. codex1, codex2, codex3, codex4, and codexui now share live sessions."
 Write-Host "Auth remains separate because auth.json was not linked or copied."
 Write-Host ""
 Write-Host "Use:"
 Write-Host "  codex1 resume --all"
 Write-Host "  codex2 resume --all"
+Write-Host "  codex3 resume --all"
+Write-Host "  codex4 resume --all"
 Write-Host "  codexui resume --all"
 Write-Host "  codexsharedstatus"

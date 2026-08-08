@@ -7,6 +7,8 @@ $Homes = @(
     @{ Name = "UI";      Path = Join-Path $env:USERPROFILE ".codex" },
     @{ Name = "codex1";  Path = Join-Path $env:USERPROFILE ".codex-plus-1" },
     @{ Name = "codex2";  Path = Join-Path $env:USERPROFILE ".codex-plus-2" },
+    @{ Name = "codex3";  Path = Join-Path $env:USERPROFILE ".codex-plus-3" },
+    @{ Name = "codex4";  Path = Join-Path $env:USERPROFILE ".codex-plus-4" },
     @{ Name = "shared";  Path = Join-Path $env:USERPROFILE ".codex-shared-history" }
 )
 
@@ -41,4 +43,6 @@ Write-Host ""
 Write-Host "Login status checks:"
 Write-Host "  codex1 login status"
 Write-Host "  codex2 login status"
+Write-Host "  codex3 login status"
+Write-Host "  codex4 login status"
 Write-Host "  codexui login status"

@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Converts Codex UI/default, codex1, and codex2 profiles to use one shared live session store.
+# Converts Codex UI/default, codex1, codex2, codex3, and codex4 profiles to one shared live session store.
 # This uses symlinks for sessions, archived_sessions, and history.jsonl.
 # This script never links or copies auth.json.
 
 NO_HISTORY_LINK=0
 if [ "${1:-}" = "--no-history-link" ]; then
   NO_HISTORY_LINK=1
+elif [ "$#" -gt 0 ]; then
+  echo "usage: $0 [--no-history-link]" >&2
+  exit 2
 fi
 
 CODEX_UI_HOME="$HOME/.codex"
 CODEX1_HOME="$HOME/.codex-plus-1"
 CODEX2_HOME="$HOME/.codex-plus-2"
+CODEX3_HOME="$HOME/.codex-plus-3"
+CODEX4_HOME="$HOME/.codex-plus-4"
 CODEX_SHARED_HOME="$HOME/.codex-shared-history"
-HOMES=("$CODEX_UI_HOME" "$CODEX1_HOME" "$CODEX2_HOME")
+HOMES=("$CODEX_UI_HOME" "$CODEX1_HOME" "$CODEX2_HOME" "$CODEX3_HOME" "$CODEX4_HOME")
 BACKUP_ROOT="$HOME/codex-backup-before-shared-links-$(date +%Y%m%d-%H%M%S)"
 
 mkdir -p "$CODEX_SHARED_HOME/sessions" "$CODEX_SHARED_HOME/archived_sessions" "$BACKUP_ROOT"
@@ -28,6 +33,13 @@ copy_dir_contents() {
   local dst="$2"
   [ -d "$src" ] || return 0
   mkdir -p "$dst"
+
+  # Re-running the script after an older installation may mean src already links to dst.
+  # Never ask rsync/cp to copy a directory into itself.
+  if [ "$(readlink -f "$src")" = "$(readlink -f "$dst")" ]; then
+    return 0
+  fi
+
   if command -v rsync >/dev/null 2>&1; then
     rsync -a --ignore-existing "$src/" "$dst/"
   else
@@ -80,11 +92,13 @@ for h in "${HOMES[@]}"; do
 done
 
 echo ""
-echo "Done. codex1, codex2, and codexui now share live sessions."
+echo "Done. codex1, codex2, codex3, codex4, and codexui now share live sessions."
 echo "Auth remains separate because auth.json was not linked or copied."
 echo ""
 echo "Use:"
 echo "  codex1 resume --all"
 echo "  codex2 resume --all"
+echo "  codex3 resume --all"
+echo "  codex4 resume --all"
 echo "  codexui resume --all"
 echo "  codexsharedstatus"
