@@ -1,30 +1,80 @@
 <#
 .SYNOPSIS
-  Converts Codex UI, codex1, codex2, codex3, and codex4 profiles to use one shared live session store.
+  Connects the Codex UI/default profile and any number of CLI account profiles
+  to one shared live local session store.
 
 .DESCRIPTION
-  Creates junctions:
-    %USERPROFILE%\.codex\sessions              -> %USERPROFILE%\.codex-shared-history\sessions
-    %USERPROFILE%\.codex-plus-1\sessions       -> %USERPROFILE%\.codex-shared-history\sessions
-    %USERPROFILE%\.codex-plus-2\sessions       -> %USERPROFILE%\.codex-shared-history\sessions
-    %USERPROFILE%\.codex-plus-3\sessions       -> %USERPROFILE%\.codex-shared-history\sessions
-    %USERPROFILE%\.codex-plus-4\sessions       -> %USERPROFILE%\.codex-shared-history\sessions
+  For every configured profile, this script:
+    - merges existing sessions and archived sessions into .codex-shared-history
+    - merges unique history.jsonl lines
+    - creates directory junctions for sessions and archived_sessions when needed
+    - creates a hardlink for history.jsonl when needed unless -NoHistoryLink is used
 
-  The same is done for archived_sessions.
-  Creates a hardlink for history.jsonl unless -NoHistoryLink is passed.
+  Authentication is never copied or linked.
 
-  This script never links or copies auth.json.
+  Existing correct junctions/hardlinks are left in place. This makes rerunning the
+  script additive and avoids unnecessarily touching already-configured profiles.
+
+.PARAMETER AccountCount
+  Number of CLI profiles. If omitted, the saved/discovered count is used.
 
 .PARAMETER NoHistoryLink
-  Do not hardlink history.jsonl. Conversation resume works from sessions even without history.jsonl.
+  Share session folders but do not create/recreate history.jsonl hardlinks.
+
+.PARAMETER Force
+  Do not pause or require Codex processes to be closed before attempting the update.
+  This is the mode used by setup-codex-accounts.bat. Windows can still reject an
+  operation if another process has an exclusive OS-level lock on a file being changed.
 #>
 
 param(
-    [switch]$NoHistoryLink
+    [int]$AccountCount = 0,
+    [switch]$NoHistoryLink,
+    [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
 try { $global:PSNativeCommandUseErrorActionPreference = $false } catch {}
+
+$SwitcherDir = Join-Path $env:USERPROFILE ".codex-switcher"
+$CountFile = Join-Path $SwitcherDir "account-count.txt"
+
+function Get-SavedAccountCount {
+    if (!(Test-Path $CountFile)) { return 0 }
+    $saved = (Get-Content -LiteralPath $CountFile -Raw).Trim()
+    $parsed = 0
+    if ([int]::TryParse($saved, [ref]$parsed) -and $parsed -ge 1 -and $parsed -le 99) {
+        return $parsed
+    }
+    return 0
+}
+
+function Get-HighestExistingProfileNumber {
+    $max = 0
+    Get-ChildItem -LiteralPath $env:USERPROFILE -Directory -Force -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            if ($_.Name -match '^\.codex-plus-(\d+)$') {
+                $n = [int]$Matches[1]
+                if ($n -ge 1 -and $n -le 99 -and $n -gt $max) { $max = $n }
+            }
+        }
+    return $max
+}
+
+function Resolve-AccountCount {
+    param([int]$Requested)
+    if ($Requested -gt 99 -or $Requested -lt 0) {
+        throw "AccountCount must be between 1 and 99."
+    }
+    $saved = Get-SavedAccountCount
+    $existing = Get-HighestExistingProfileNumber
+    if ($Requested -gt 0) {
+        return [Math]::Max($Requested, [Math]::Max($saved, $existing))
+    }
+    $resolved = [Math]::Max($saved, $existing)
+    if ($resolved -le 0) { $resolved = 4 }
+    return $resolved
+}
 
 function Invoke-RoboCopySafe {
     param(
@@ -63,6 +113,56 @@ function Test-LinkTargetsDirectory {
     return [string]::Equals($actual, $expected, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
+function Test-HardLinkTargetsFile {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][string]$ExpectedTarget
+    )
+
+    if (!(Test-Path -LiteralPath $Path) -or !(Test-Path -LiteralPath $ExpectedTarget)) { return $false }
+
+    $pathFull = [System.IO.Path]::GetFullPath($Path)
+    $expectedFull = [System.IO.Path]::GetFullPath($ExpectedTarget)
+    if ([string]::Equals($pathFull, $expectedFull, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+
+    # PowerShell exposes hardlink targets on many Windows versions.
+    try {
+        $item = Get-Item -LiteralPath $Path -Force
+        if ($item.LinkType -eq "HardLink" -and $item.Target) {
+            foreach ($target in @($item.Target)) {
+                $candidate = [string]$target
+                if (![System.IO.Path]::IsPathRooted($candidate)) {
+                    $candidate = Join-Path $item.Directory.FullName $candidate
+                }
+                if ([string]::Equals([System.IO.Path]::GetFullPath($candidate), $expectedFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    return $true
+                }
+            }
+        }
+    } catch {}
+
+    # Fallback for Windows PowerShell versions where Target is not populated for hardlinks.
+    try {
+        $driveRoot = [System.IO.Path]::GetPathRoot($pathFull).TrimEnd('\')
+        $links = @(& fsutil.exe hardlink list $pathFull 2>$null)
+        if ($LASTEXITCODE -eq 0) {
+            foreach ($link in $links) {
+                $candidate = ([string]$link).Trim()
+                if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+                if ($candidate.StartsWith('\')) {
+                    $candidate = $driveRoot + $candidate
+                }
+                try { $candidate = [System.IO.Path]::GetFullPath($candidate) } catch { continue }
+                if ([string]::Equals($candidate, $expectedFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    return $true
+                }
+            }
+        }
+    } catch {}
+
+    return $false
+}
+
 function Remove-PathWithoutFollowingJunction {
     param([Parameter(Mandatory=$true)][string]$Path)
 
@@ -73,6 +173,7 @@ function Remove-PathWithoutFollowingJunction {
 
     if ($isReparse -and $item.PSIsContainer) {
         cmd /c rmdir "$Path" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not remove junction '$Path'." }
     } else {
         Remove-Item -LiteralPath $Path -Recurse -Force
     }
@@ -102,28 +203,39 @@ function Merge-JsonlUnique {
     [System.IO.File]::WriteAllLines($Destination, $out)
 }
 
-$CodexUiHome     = Join-Path $env:USERPROFILE ".codex"
-$Codex1Home      = Join-Path $env:USERPROFILE ".codex-plus-1"
-$Codex2Home      = Join-Path $env:USERPROFILE ".codex-plus-2"
-$Codex3Home      = Join-Path $env:USERPROFILE ".codex-plus-3"
-$Codex4Home      = Join-Path $env:USERPROFILE ".codex-plus-4"
+$AccountCount = Resolve-AccountCount -Requested $AccountCount
+$CodexUiHome = Join-Path $env:USERPROFILE ".codex"
 $CodexSharedHome = Join-Path $env:USERPROFILE ".codex-shared-history"
-$Homes           = @($CodexUiHome, $Codex1Home, $Codex2Home, $Codex3Home, $Codex4Home)
+
+$Homes = @($CodexUiHome)
+for ($i = 1; $i -le $AccountCount; $i++) {
+    $Homes += Join-Path $env:USERPROFILE ".codex-plus-$i"
+}
 
 $BackupRoot = Join-Path $env:USERPROFILE ("codex-backup-before-shared-links-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+$SharedSessions = Join-Path $CodexSharedHome "sessions"
+$SharedArchived = Join-Path $CodexSharedHome "archived_sessions"
+$SharedHistory = Join-Path $CodexSharedHome "history.jsonl"
 
-New-Item -ItemType Directory -Force -Path $CodexSharedHome | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $CodexSharedHome "sessions") | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $CodexSharedHome "archived_sessions") | Out-Null
+New-Item -ItemType Directory -Force -Path $SharedSessions | Out-Null
+New-Item -ItemType Directory -Force -Path $SharedArchived | Out-Null
 New-Item -ItemType Directory -Force -Path $BackupRoot | Out-Null
 
+Write-Host "Configured CLI accounts: $AccountCount"
 Write-Host "Backup folder: $BackupRoot"
-Write-Host "Close Codex CLI/UI/IDE before running this script. If a file is locked, close Codex and run again."
+if ($Force) {
+    Write-Host "Force mode enabled: continuing without a close-session prompt."
+} else {
+    Write-Host "No interactive process check is performed. Close Codex only if Windows reports a locked file."
+}
+Write-Host "Existing correct shared links will be preserved instead of recreated."
 Write-Host ""
 
 $HistorySources = @()
-$SharedHistory = Join-Path $CodexSharedHome "history.jsonl"
-if (Test-Path $SharedHistory) { $HistorySources += $SharedHistory }
+$DistinctHistoryFound = $false
+if (Test-Path $SharedHistory) {
+    $HistorySources += $SharedHistory
+}
 
 foreach ($h in $Homes) {
     New-Item -ItemType Directory -Force -Path $h | Out-Null
@@ -134,35 +246,45 @@ foreach ($h in $Homes) {
 
     $sessions = Join-Path $h "sessions"
     $archived = Join-Path $h "archived_sessions"
-    $history  = Join-Path $h "history.jsonl"
-
-    $sharedSessions = Join-Path $CodexSharedHome "sessions"
-    $sharedArchived = Join-Path $CodexSharedHome "archived_sessions"
+    $history = Join-Path $h "history.jsonl"
 
     if (Test-Path $sessions) {
-        if (!(Test-LinkTargetsDirectory -Path $sessions -ExpectedTarget $sharedSessions)) {
+        if (!(Test-LinkTargetsDirectory -Path $sessions -ExpectedTarget $SharedSessions)) {
             Copy-Item $sessions $backupHome -Recurse -Force -ErrorAction SilentlyContinue
-            Invoke-RoboCopySafe -Source $sessions -Destination $sharedSessions
+            Invoke-RoboCopySafe -Source $sessions -Destination $SharedSessions
         }
     }
 
     if (Test-Path $archived) {
-        if (!(Test-LinkTargetsDirectory -Path $archived -ExpectedTarget $sharedArchived)) {
+        if (!(Test-LinkTargetsDirectory -Path $archived -ExpectedTarget $SharedArchived)) {
             Copy-Item $archived $backupHome -Recurse -Force -ErrorAction SilentlyContinue
-            Invoke-RoboCopySafe -Source $archived -Destination $sharedArchived
+            Invoke-RoboCopySafe -Source $archived -Destination $SharedArchived
         }
     }
 
     if (Test-Path $history) {
-        Copy-Item $history $backupHome -Force -ErrorAction SilentlyContinue
-        $HistorySources += $history
+        $alreadyShared = (Test-Path $SharedHistory) -and (Test-HardLinkTargetsFile -Path $history -ExpectedTarget $SharedHistory)
+        if (!$alreadyShared) {
+            Copy-Item $history $backupHome -Force -ErrorAction SilentlyContinue
+            $HistorySources += $history
+            $DistinctHistoryFound = $true
+        }
     }
 }
 
-if ($HistorySources.Count -gt 0) {
+if (!(Test-Path $SharedHistory)) {
+    if ($HistorySources.Count -gt 0) {
+        Merge-JsonlUnique -Sources $HistorySources -Destination $SharedHistory
+    } else {
+        New-Item -ItemType File -Force -Path $SharedHistory | Out-Null
+    }
+} elseif ($DistinctHistoryFound) {
+    # Merge only when a profile has history that is not already the shared hardlink.
+    # A normal rerun/add-account operation therefore does not rewrite the existing
+    # shared history file or disturb already-configured profiles.
     Merge-JsonlUnique -Sources $HistorySources -Destination $SharedHistory
-} elseif (!(Test-Path $SharedHistory)) {
-    New-Item -ItemType File -Force -Path $SharedHistory | Out-Null
+} else {
+    Write-Host "Existing history.jsonl is already shared; no history rewrite needed."
 }
 
 foreach ($h in $Homes) {
@@ -170,28 +292,39 @@ foreach ($h in $Homes) {
 
     $sessions = Join-Path $h "sessions"
     $archived = Join-Path $h "archived_sessions"
-    $history  = Join-Path $h "history.jsonl"
+    $history = Join-Path $h "history.jsonl"
 
-    Remove-PathWithoutFollowingJunction -Path $sessions
-    Remove-PathWithoutFollowingJunction -Path $archived
+    if (!(Test-LinkTargetsDirectory -Path $sessions -ExpectedTarget $SharedSessions)) {
+        Remove-PathWithoutFollowingJunction -Path $sessions
+        New-Item -ItemType Junction -Path $sessions -Target $SharedSessions | Out-Null
+        Write-Host "Linked sessions: $h"
+    }
 
-    New-Item -ItemType Junction -Path $sessions -Target (Join-Path $CodexSharedHome "sessions") | Out-Null
-    New-Item -ItemType Junction -Path $archived -Target (Join-Path $CodexSharedHome "archived_sessions") | Out-Null
+    if (!(Test-LinkTargetsDirectory -Path $archived -ExpectedTarget $SharedArchived)) {
+        Remove-PathWithoutFollowingJunction -Path $archived
+        New-Item -ItemType Junction -Path $archived -Target $SharedArchived | Out-Null
+        Write-Host "Linked archived_sessions: $h"
+    }
 
-    if (!$NoHistoryLink) {
-        if (Test-Path $history) { Remove-Item -LiteralPath $history -Force }
+    if (!$NoHistoryLink -and !(Test-HardLinkTargetsFile -Path $history -ExpectedTarget $SharedHistory)) {
+        if (Test-Path $history) {
+            Remove-Item -LiteralPath $history -Force
+        }
         New-Item -ItemType HardLink -Path $history -Target $SharedHistory | Out-Null
+        Write-Host "Linked history.jsonl: $h"
     }
 }
 
 Write-Host ""
-Write-Host "Done. codex1, codex2, codex3, codex4, and codexui now share live sessions."
-Write-Host "Auth remains separate because auth.json was not linked or copied."
+Write-Host "Done. codex1..codex$AccountCount and codexui now share live local sessions/history."
+Write-Host "Existing auth.json files were not removed, copied, linked, or replaced."
+Write-Host "Already-correct links were kept in place; newly added profiles were attached to the shared store."
+Write-Host "No periodic copy-sync job is needed: the profiles point at the same session store."
 Write-Host ""
-Write-Host "Use:"
+Write-Host "Use a new PowerShell window, then:"
 Write-Host "  codex1 resume --all"
-Write-Host "  codex2 resume --all"
-Write-Host "  codex3 resume --all"
-Write-Host "  codex4 resume --all"
+if ($AccountCount -gt 1) {
+    Write-Host "  ... through codex$AccountCount resume --all"
+}
 Write-Host "  codexui resume --all"
 Write-Host "  codexsharedstatus"

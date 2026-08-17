@@ -1,11 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Usage: ./check-codex-profiles.sh [account-count]
+
+COUNT_FILE="$HOME/.codex-switcher/account-count.txt"
+ACCOUNT_COUNT="${1:-}"
+
+if [[ -z "$ACCOUNT_COUNT" ]]; then
+  if [[ -f "$COUNT_FILE" ]] && [[ "$(cat "$COUNT_FILE")" =~ ^[1-9][0-9]*$ ]]; then
+    ACCOUNT_COUNT="$(cat "$COUNT_FILE")"
+  else
+    ACCOUNT_COUNT=4
+  fi
+fi
+
+[[ "$ACCOUNT_COUNT" =~ ^[1-9][0-9]*$ ]] || { echo "account count must be 1..99" >&2; exit 2; }
+(( ACCOUNT_COUNT <= 99 )) || { echo "account count must be 1..99" >&2; exit 2; }
+
 CODEX_UI_HOME="$HOME/.codex"
-CODEX1_HOME="$HOME/.codex-plus-1"
-CODEX2_HOME="$HOME/.codex-plus-2"
-CODEX3_HOME="$HOME/.codex-plus-3"
-CODEX4_HOME="$HOME/.codex-plus-4"
 CODEX_SHARED_HOME="$HOME/.codex-shared-history"
 
 if command -v codex >/dev/null 2>&1; then
@@ -15,15 +27,13 @@ else
   echo "codex: not found in PATH"
 fi
 
-for entry in \
-  "UI:$CODEX_UI_HOME" \
-  "codex1:$CODEX1_HOME" \
-  "codex2:$CODEX2_HOME" \
-  "codex3:$CODEX3_HOME" \
-  "codex4:$CODEX4_HOME" \
-  "shared:$CODEX_SHARED_HOME"; do
-  name="${entry%%:*}"
-  path="${entry#*:}"
+echo "Configured CLI accounts: $ACCOUNT_COUNT"
+
+show_home() {
+  local name="$1"
+  local path="$2"
+  local child p
+
   echo ""
   echo "[$name] $path"
   for child in auth.json config.toml history.jsonl sessions archived_sessions; do
@@ -38,12 +48,17 @@ for entry in \
       echo "  $(printf '%-18s' "$child") missing"
     fi
   done
+}
+
+show_home "UI" "$CODEX_UI_HOME"
+for ((i=1; i<=ACCOUNT_COUNT; i++)); do
+  show_home "codex$i" "$HOME/.codex-plus-$i"
 done
+show_home "shared" "$CODEX_SHARED_HOME"
 
 echo ""
 echo "Login status checks:"
-echo "  codex1 login status"
-echo "  codex2 login status"
-echo "  codex3 login status"
-echo "  codex4 login status"
+for ((i=1; i<=ACCOUNT_COUNT; i++)); do
+  echo "  codex$i login status"
+done
 echo "  codexui login status"

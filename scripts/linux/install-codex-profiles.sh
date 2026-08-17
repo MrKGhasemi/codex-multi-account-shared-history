@@ -1,93 +1,117 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Installs shell helper commands for four Codex ChatGPT accounts on Linux/macOS-like shells.
-# It creates:
-#   codex1  -> CODEX_HOME=$HOME/.codex-plus-1
-#   codex2  -> CODEX_HOME=$HOME/.codex-plus-2
-#   codex3  -> CODEX_HOME=$HOME/.codex-plus-3
-#   codex4  -> CODEX_HOME=$HOME/.codex-plus-4
-#   codexui -> CODEX_HOME=$HOME/.codex
-#
-# This script does NOT copy, sync, or commit auth.json.
+# Installs shell helper commands for any number of Codex ChatGPT accounts.
+# Usage: ./install-codex-profiles.sh [account-count]
+# If no count is supplied, the saved count is reused, or 4 is used initially.
 
-CODEX_UI_HOME="$HOME/.codex"
-CODEX1_HOME="$HOME/.codex-plus-1"
-CODEX2_HOME="$HOME/.codex-plus-2"
-CODEX3_HOME="$HOME/.codex-plus-3"
-CODEX4_HOME="$HOME/.codex-plus-4"
-CODEX_SHARED_HOME="$HOME/.codex-shared-history"
 SWITCHER_DIR="$HOME/.codex-switcher"
+COUNT_FILE="$SWITCHER_DIR/account-count.txt"
 FUNCTIONS_FILE="$SWITCHER_DIR/codex-functions.sh"
+CODEX_UI_HOME="$HOME/.codex"
+CODEX_SHARED_HOME="$HOME/.codex-shared-history"
 
-mkdir -p \
-  "$CODEX_UI_HOME" \
-  "$CODEX1_HOME" \
-  "$CODEX2_HOME" \
-  "$CODEX3_HOME" \
-  "$CODEX4_HOME" \
-  "$CODEX_SHARED_HOME" \
-  "$SWITCHER_DIR"
+requested="${1:-}"
+if [[ -n "$requested" ]]; then
+  [[ "$requested" =~ ^[1-9][0-9]*$ ]] || { echo "account count must be 1..99" >&2; exit 2; }
+  (( requested <= 99 )) || { echo "account count must be 1..99" >&2; exit 2; }
+  ACCOUNT_COUNT="$requested"
+elif [[ -f "$COUNT_FILE" ]] && [[ "$(cat "$COUNT_FILE")" =~ ^[1-9][0-9]*$ ]]; then
+  ACCOUNT_COUNT="$(cat "$COUNT_FILE")"
+else
+  ACCOUNT_COUNT=4
+fi
 
-# Keep credentials in each CLI profile's own CODEX_HOME.
-for profile_home in "$CODEX1_HOME" "$CODEX2_HOME" "$CODEX3_HOME" "$CODEX4_HOME"; do
-  printf '%s\n' 'cli_auth_credentials_store = "file"' > "$profile_home/config.toml"
+mkdir -p "$CODEX_UI_HOME" "$CODEX_SHARED_HOME" "$SWITCHER_DIR"
+printf '%s\n' "$ACCOUNT_COUNT" > "$COUNT_FILE"
+chmod 700 "$SWITCHER_DIR"
+chmod 600 "$COUNT_FILE"
+
+set_file_credential_store() {
+  local profile_home="$1"
+  local config="$profile_home/config.toml"
+  local required='cli_auth_credentials_store = "file"'
+  mkdir -p "$profile_home"
+
+  if [[ ! -f "$config" ]]; then
+    printf '%s\n' "$required" > "$config"
+    return
+  fi
+
+  if grep -Eq '^[[:space:]]*cli_auth_credentials_store[[:space:]]*=' "$config"; then
+    awk -v line="$required" '
+      /^[[:space:]]*cli_auth_credentials_store[[:space:]]*=/ { print line; next }
+      { print }
+    ' "$config" > "$config.tmp"
+    mv "$config.tmp" "$config"
+  else
+    printf '\n%s\n' "$required" >> "$config"
+  fi
+}
+
+for ((i=1; i<=ACCOUNT_COUNT; i++)); do
+  set_file_credential_store "$HOME/.codex-plus-$i"
 done
 
-cat > "$FUNCTIONS_FILE" <<'FUNCTIONS_EOF'
+{
+  cat <<EOF
 # >>> Codex multi-account shared-history switcher >>>
-
-export CODEX_UI_HOME="$HOME/.codex"
-export CODEX1_HOME="$HOME/.codex-plus-1"
-export CODEX2_HOME="$HOME/.codex-plus-2"
-export CODEX3_HOME="$HOME/.codex-plus-3"
-export CODEX4_HOME="$HOME/.codex-plus-4"
-export CODEX_SHARED_HOME="$HOME/.codex-shared-history"
+export CODEX_ACCOUNT_COUNT="$ACCOUNT_COUNT"
+export CODEX_UI_HOME="\$HOME/.codex"
+export CODEX_SHARED_HOME="\$HOME/.codex-shared-history"
 
 _codex_with_home() {
-  if [ "$#" -lt 1 ]; then
+  if [ "\$#" -lt 1 ]; then
     echo "usage: _codex_with_home <CODEX_HOME> [codex args...]" >&2
     return 2
   fi
 
-  local new_home="$1"
+  local new_home="\$1"
   shift
-
   local had_old=0
   local old_home=""
-  if [ "${CODEX_HOME+x}" = x ]; then
+
+  if [ "\${CODEX_HOME+x}" = x ]; then
     had_old=1
-    old_home="$CODEX_HOME"
+    old_home="\$CODEX_HOME"
   fi
 
-  export CODEX_HOME="$new_home"
-  codex "$@"
-  local status=$?
+  export CODEX_HOME="\$new_home"
+  codex "\$@"
+  local status=\$?
 
-  if [ "$had_old" -eq 1 ]; then
-    export CODEX_HOME="$old_home"
+  if [ "\$had_old" -eq 1 ]; then
+    export CODEX_HOME="\$old_home"
   else
     unset CODEX_HOME
   fi
-
-  return "$status"
+  return "\$status"
 }
 
-codex1() {
-  _codex_with_home "$CODEX1_HOME" "$@"
+codexaccount() {
+  if [ "\$#" -lt 1 ]; then
+    echo "usage: codexaccount <1..\$CODEX_ACCOUNT_COUNT> [codex args...]" >&2
+    return 2
+  fi
+  local account="\$1"
+  shift
+  case "\$account" in
+    ''|*[!0-9]*) echo "invalid account number" >&2; return 2 ;;
+  esac
+  if [ "\$account" -lt 1 ] || [ "\$account" -gt "\$CODEX_ACCOUNT_COUNT" ]; then
+    echo "account must be between 1 and \$CODEX_ACCOUNT_COUNT" >&2
+    return 2
+  fi
+  _codex_with_home "\$HOME/.codex-plus-\$account" "\$@"
 }
 
-codex2() {
-  _codex_with_home "$CODEX2_HOME" "$@"
-}
+EOF
 
-codex3() {
-  _codex_with_home "$CODEX3_HOME" "$@"
-}
+  for ((i=1; i<=ACCOUNT_COUNT; i++)); do
+    printf 'codex%d() { codexaccount %d "$@"; }\n' "$i" "$i"
+  done
 
-codex4() {
-  _codex_with_home "$CODEX4_HOME" "$@"
-}
+  cat <<'EOF'
 
 codexui() {
   _codex_with_home "$CODEX_UI_HOME" "$@"
@@ -95,16 +119,11 @@ codexui() {
 
 codexsharedstatus() {
   command -v codex >/dev/null 2>&1 && echo "codex: $(command -v codex)" || echo "codex: not found"
+  echo "Configured CLI accounts: $CODEX_ACCOUNT_COUNT"
 
-  for entry in \
-    "UI:$CODEX_UI_HOME" \
-    "codex1:$CODEX1_HOME" \
-    "codex2:$CODEX2_HOME" \
-    "codex3:$CODEX3_HOME" \
-    "codex4:$CODEX4_HOME" \
-    "shared:$CODEX_SHARED_HOME"; do
-    name="${entry%%:*}"
-    path="${entry#*:}"
+  local name path child p i
+  for name in UI; do
+    path="$CODEX_UI_HOME"
     echo ""
     echo "[$name] $path"
     for child in auth.json config.toml history.jsonl sessions archived_sessions; do
@@ -120,12 +139,47 @@ codexsharedstatus() {
       fi
     done
   done
+
+  for ((i=1; i<=CODEX_ACCOUNT_COUNT; i++)); do
+    name="codex$i"
+    path="$HOME/.codex-plus-$i"
+    echo ""
+    echo "[$name] $path"
+    for child in auth.json config.toml history.jsonl sessions archived_sessions; do
+      p="$path/$child"
+      if [ -L "$p" ]; then
+        echo "  $(printf '%-18s' "$child") link -> $(readlink "$p")"
+      elif [ -d "$p" ]; then
+        echo "  $(printf '%-18s' "$child") dir"
+      elif [ -f "$p" ]; then
+        echo "  $(printf '%-18s' "$child") file"
+      else
+        echo "  $(printf '%-18s' "$child") missing"
+      fi
+    done
+  done
+
+  name="shared"
+  path="$CODEX_SHARED_HOME"
+  echo ""
+  echo "[$name] $path"
+  for child in auth.json config.toml history.jsonl sessions archived_sessions; do
+    p="$path/$child"
+    if [ -L "$p" ]; then
+      echo "  $(printf '%-18s' "$child") link -> $(readlink "$p")"
+    elif [ -d "$p" ]; then
+      echo "  $(printf '%-18s' "$child") dir"
+    elif [ -f "$p" ]; then
+      echo "  $(printf '%-18s' "$child") file"
+    else
+      echo "  $(printf '%-18s' "$child") missing"
+    fi
+  done
 }
-
 # <<< Codex multi-account shared-history switcher <<<
-FUNCTIONS_EOF
+EOF
+} > "$FUNCTIONS_FILE"
 
-chmod 700 "$SWITCHER_DIR"
 chmod 600 "$FUNCTIONS_FILE"
 
 SOURCE_LINE="[ -f \"$FUNCTIONS_FILE\" ] && . \"$FUNCTIONS_FILE\""
@@ -147,22 +201,14 @@ case "${SHELL:-}" in
 esac
 
 echo ""
-echo "Installed Codex profile switcher for four accounts."
+echo "Installed Codex profile switcher for $ACCOUNT_COUNT account(s)."
 echo "Functions file: $FUNCTIONS_FILE"
+echo "Saved account count: $COUNT_FILE"
 echo ""
 echo "Load it now with:"
 echo "  source \"$FUNCTIONS_FILE\""
 echo ""
-echo "Next commands:"
-echo '  CODEX_HOME="$HOME/.codex-plus-1" codex login --device-auth'
-echo '  CODEX_HOME="$HOME/.codex-plus-2" codex login --device-auth'
-echo '  CODEX_HOME="$HOME/.codex-plus-3" codex login --device-auth'
-echo '  CODEX_HOME="$HOME/.codex-plus-4" codex login --device-auth'
-echo ""
-echo "Usage after login:"
-echo "  codex1 resume --all"
-echo "  codex2 resume --all"
-echo "  codex3 resume --all"
-echo "  codex4 resume --all"
-echo "  codexui resume --all"
-echo "  codexsharedstatus"
+echo "Login commands:"
+for ((i=1; i<=ACCOUNT_COUNT; i++)); do
+  echo "  CODEX_HOME=\"\$HOME/.codex-plus-$i\" codex login"
+done

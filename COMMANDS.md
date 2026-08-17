@@ -1,148 +1,124 @@
-# Copy-paste commands for four Codex accounts
+# Command reference
 
-## Windows
+## Windows: one-file setup
 
-Install Codex CLI if missing:
+Interactive:
 
-```powershell
-npm install -g @openai/codex
-codex --version
+```bat
+setup-codex-accounts.bat
 ```
 
-Install or upgrade the switcher:
+Pass the account count directly:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-codex-profiles.ps1
-. $PROFILE
+```bat
+setup-codex-accounts.bat 6
 ```
 
-Log in:
+## Windows: manual PowerShell
+
+Configure six account profiles:
 
 ```powershell
-$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-1"; codex login --device-auth
-$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-2"; codex login --device-auth
-$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-3"; codex login --device-auth
-$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-4"; codex login --device-auth
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-codex-profiles.ps1 -AccountCount 6
 ```
 
-Check logins:
+Enable shared live local history:
 
 ```powershell
-codex1 login status
-codex2 login status
-codex3 login status
-codex4 login status
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\use-live-shared-history.ps1 -AccountCount 6 -Force
 ```
 
-Enable shared live history:
+Check:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\use-live-shared-history.ps1
-```
-
-Use profiles:
-
-```powershell
-codex1 resume --all
-codex2 resume --all
-codex3 resume --all
-codex4 resume --all
-codexui resume --all
-```
-
-Inspect links:
-
-```powershell
-codexsharedstatus
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\check-codex-profiles.ps1
 ```
 
-Remove an old copy-sync block:
+Login to a profile:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\remove-old-copy-sync-block.ps1
-. $PROFILE
+$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-1"
+codex login
 ```
 
----
+Headless/device-code login:
 
-## Linux
-
-Install Codex CLI if missing:
-
-```bash
-npm install -g @openai/codex
-codex --version
+```powershell
+$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-1"
+codex login --device-auth
 ```
 
-Install or upgrade the switcher:
+After opening a new PowerShell window:
 
-```bash
-bash ./scripts/linux/install-codex-profiles.sh
-source "$HOME/.codex-switcher/codex-functions.sh"
+```powershell
+codex1
+codex2
+codexaccount 2
+codexui
+codexsharedstatus
 ```
 
-Log in:
+Resume shared sessions:
 
-```bash
-CODEX_HOME="$HOME/.codex-plus-1" codex login --device-auth
-CODEX_HOME="$HOME/.codex-plus-2" codex login --device-auth
-CODEX_HOME="$HOME/.codex-plus-3" codex login --device-auth
-CODEX_HOME="$HOME/.codex-plus-4" codex login --device-auth
-```
-
-Check logins:
-
-```bash
-codex1 login status
-codex2 login status
-codex3 login status
-codex4 login status
-```
-
-Enable shared live history:
-
-```bash
-bash ./scripts/linux/use-live-shared-history.sh
-```
-
-Use profiles:
-
-```bash
+```powershell
+codex1 resume --last
 codex1 resume --all
-codex2 resume --all
-codex3 resume --all
-codex4 resume --all
 codexui resume --all
 ```
 
-Inspect links:
+Check auth:
+
+```powershell
+codex1 login status
+codex2 login status
+codexui login status
+```
+
+## Linux / macOS-like shells
+
+Configure six accounts:
 
 ```bash
-codexsharedstatus
+bash ./scripts/linux/install-codex-profiles.sh 6
+source "$HOME/.codex-switcher/codex-functions.sh"
+```
+
+Login:
+
+```bash
+CODEX_HOME="$HOME/.codex-plus-1" codex login
+```
+
+Enable live sharing:
+
+```bash
+bash ./scripts/linux/use-live-shared-history.sh --accounts 6
+```
+
+Check:
+
+```bash
 bash ./scripts/linux/check-codex-profiles.sh
 ```
 
----
-
-## Common commands
-
-Start new sessions:
+Use:
 
 ```bash
 codex1
-codex2
-codex3
-codex4
+codex6
+codexaccount 6
+codexui
+codexsharedstatus
 ```
 
-Resume last sessions:
+Never commit or share any profile's `auth.json`.
 
-```bash
-codex1 resume --last
-codex2 resume --last
-codex3 resume --last
-codex4 resume --last
+## Add one more account without relogging existing accounts
+
+If `codex1` through `codex4` already have `auth.json`, run:
+
+```bat
+setup-codex-accounts.bat 5
 ```
 
-Never delete or commit any profile’s `auth.json` unless you intentionally want to remove credentials.
+The setup preserves accounts 1-4, adds account 5, shares history across all five, and offers login only for account 5.

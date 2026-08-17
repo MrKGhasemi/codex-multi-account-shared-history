@@ -1,17 +1,17 @@
 # Security Policy
 
-This repository separates authentication for four Codex CLI accounts and never intentionally shares authentication files.
+This project separates authentication for each Codex CLI account and shares only local conversation/session data.
 
 ## Sensitive files
 
-Codex credentials may be stored in `auth.json` at these locations:
+Codex credentials may be stored in:
 
 ```text
 ~/.codex/auth.json
 ~/.codex-plus-1/auth.json
 ~/.codex-plus-2/auth.json
-~/.codex-plus-3/auth.json
-~/.codex-plus-4/auth.json
+...
+~/.codex-plus-N/auth.json
 ```
 
 Windows equivalents:
@@ -19,18 +19,17 @@ Windows equivalents:
 ```text
 %USERPROFILE%\.codex\auth.json
 %USERPROFILE%\.codex-plus-1\auth.json
-%USERPROFILE%\.codex-plus-2\auth.json
-%USERPROFILE%\.codex-plus-3\auth.json
-%USERPROFILE%\.codex-plus-4\auth.json
+...
+%USERPROFILE%\.codex-plus-N\auth.json
 ```
 
 Treat every `auth.json` like a password. It may contain access tokens.
 
 ## Script boundaries
 
-The scripts do not intentionally copy, link, sync, print, or commit `auth.json`.
+The scripts never intentionally copy, link, print, sync, or commit `auth.json`.
 
-They work only with:
+They operate on:
 
 ```text
 sessions/
@@ -39,13 +38,25 @@ history.jsonl
 config.toml
 ```
 
-Each of the four CLI profile directories gets this configuration:
+For each CLI profile, the installer ensures this setting exists:
 
 ```toml
 cli_auth_credentials_store = "file"
 ```
 
-That keeps each login inside its own `CODEX_HOME`.
+Existing unrelated `config.toml` settings are preserved.
+
+The desktop/UI profile is not forced to file-backed credential storage because the desktop app may use its normal credential mode.
+
+## Account-count state
+
+The selected profile count is stored in:
+
+```text
+~/.codex-switcher/account-count.txt
+```
+
+This file contains only a number. It does not contain credentials.
 
 ## Before publishing
 
@@ -55,18 +66,10 @@ Run:
 git status --ignored
 ```
 
-Confirm these are not tracked:
+Confirm that no credential or local profile data is tracked.
 
-```text
-auth.json
-.codex/
-.codex-plus-1/
-.codex-plus-2/
-.codex-plus-3/
-.codex-plus-4/
-.codex-shared-history/
-*.backup
-*.bak-*
-```
+Never post device codes, access tokens, `auth.json`, or screenshots containing credentials.
 
-Do not post device codes, access tokens, authentication files, or screenshots containing them.
+## Rerun / account expansion safety
+
+Windows setup is additive by default. It invokes `codex login status` with each profile's `CODEX_HOME` to detect an existing login. The scripts do not parse or print credential contents, and existing `auth.json` files are not copied, linked, replaced, or deleted. An existing keyring/auto-backed profile also keeps its credential-store setting so setup does not invalidate a working login. Adding a higher account number keeps earlier account authentication intact.

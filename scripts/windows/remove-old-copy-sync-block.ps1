@@ -1,10 +1,15 @@
 <#
 .SYNOPSIS
-  Removes older copy/merge sync function blocks from the PowerShell profile and reinstalls the current switcher.
+  Removes an older marked Codex switcher block and reinstalls the current dynamic switcher.
 
 .DESCRIPTION
-  Use this if deleted conversations keep coming back because an older Sync-CodexHistory function is still in your profile.
+  Use this if an older copy/merge synchronization function is still in your PowerShell profile.
+  The saved account count is reused unless -AccountCount is provided.
 #>
+
+param(
+    [int]$AccountCount = 0
+)
 
 $ErrorActionPreference = "Stop"
 $ProfilePath = $PROFILE
@@ -17,4 +22,8 @@ if (Test-Path $ProfilePath) {
     Set-Content -Path $ProfilePath -Value ($content + "`r`n") -Encoding UTF8
 }
 
-& "$PSScriptRoot\install-codex-profiles.ps1"
+if ($AccountCount -gt 0) {
+    & "$PSScriptRoot\install-codex-profiles.ps1" -AccountCount $AccountCount
+} else {
+    & "$PSScriptRoot\install-codex-profiles.ps1"
+}

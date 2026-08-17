@@ -1,46 +1,55 @@
-# Codex Four-Account Shared History Switcher
+# Codex Multi-Account Shared History Switcher
 
-Use four ChatGPT/Codex CLI accounts on the same machine while keeping each login separate and sharing the same local Codex conversation history.
+Use **any practical number of Codex CLI / ChatGPT logins on one machine** while keeping every login separate and sharing the same local Codex conversation history.
 
-This setup provides these commands:
+> This is a local helper project. It is not an official OpenAI product.
 
-```text
-codex1  -> account 1
-codex2  -> account 2
-codex3  -> account 3
-codex4  -> account 4
-codexui -> default/UI profile
+## What changed
+
+The project is no longer hard-coded to four accounts.
+
+On Windows, run:
+
+```bat
+setup-codex-accounts.bat
 ```
 
-All five profiles can see the same local sessions, but the four CLI accounts keep separate authentication files.
+The batch file asks how many accounts you want (1-99), then:
 
-> Important: this is a local helper project. It is not an official OpenAI product.
+1. creates `.codex-plus-1` through `.codex-plus-N`
+2. configures each CLI profile to use its own file-backed `auth.json`
+3. installs `codex1` through `codexN` PowerShell commands
+4. merges existing local sessions into one shared store
+5. connects every profile to that shared store
+6. runs `codex login status` separately for each existing `CODEX_HOME` and preserves logged-in profiles
+7. offers login only for newly added/unlogged profiles
+8. prints a final status check
 
----
+It does **not** create ChatGPT accounts for you. You must already have the accounts you want to sign in with.
 
 ## How it works
 
-Each account receives its own `CODEX_HOME`:
+For `N` accounts:
 
 ```text
 Account 1 -> ~/.codex-plus-1
 Account 2 -> ~/.codex-plus-2
-Account 3 -> ~/.codex-plus-3
-Account 4 -> ~/.codex-plus-4
+...
+Account N -> ~/.codex-plus-N
 UI/default -> ~/.codex
 ```
 
-Authentication remains separate:
+Authentication stays separate:
 
 ```text
 ~/.codex-plus-1/auth.json
 ~/.codex-plus-2/auth.json
-~/.codex-plus-3/auth.json
-~/.codex-plus-4/auth.json
+...
+~/.codex-plus-N/auth.json
 ~/.codex/auth.json
 ```
 
-Only conversation data is shared:
+Only local conversation data is shared:
 
 ```text
 sessions/
@@ -54,26 +63,27 @@ The shared store is:
 ~/.codex-shared-history
 ```
 
-The scripts link every profile to it:
+Every configured profile points at the same live session directories. On Windows, `sessions` and `archived_sessions` use directory junctions and `history.jsonl` uses a hardlink. On Linux, the project uses symbolic links.
 
-```text
-~/.codex/sessions        -> ~/.codex-shared-history/sessions
-~/.codex-plus-1/sessions -> ~/.codex-shared-history/sessions
-~/.codex-plus-2/sessions -> ~/.codex-shared-history/sessions
-~/.codex-plus-3/sessions -> ~/.codex-shared-history/sessions
-~/.codex-plus-4/sessions -> ~/.codex-shared-history/sessions
+Because the profiles point to the same files, **there is no periodic copy-sync process**. New and resumed local sessions are visible across the configured profiles immediately.
+
+## Security model
+
+New or unlogged CLI profiles are configured with:
+
+```toml
+cli_auth_credentials_store = "file"
 ```
 
-On Windows, `sessions` and `archived_sessions` use directory Junctions. On Linux, they use symbolic links. Windows uses a hardlink for `history.jsonl`; Linux uses a symbolic link.
+That makes those Codex credentials live in the profile's own `CODEX_HOME/auth.json`. Existing file-backed profiles keep that behavior. If an already-existing profile is successfully logged in through a keyring/auto credential store, the installer preserves its current credential-store configuration rather than breaking that login. The scripts never intentionally copy, link, print, or commit `auth.json`.
 
-The scripts never intentionally copy or link `auth.json`.
-
----
+Treat every `auth.json` like a password.
 
 ## Repository layout
 
 ```text
 .
+├── setup-codex-accounts.bat
 ├── README.md
 ├── COMMANDS.md
 ├── SECURITY.md
@@ -83,6 +93,7 @@ The scripts never intentionally copy or link `auth.json`.
     │   ├── install-codex-profiles.ps1
     │   ├── use-live-shared-history.ps1
     │   ├── check-codex-profiles.ps1
+    │   ├── test-codex-login.ps1
     │   └── remove-old-copy-sync-block.ps1
     └── linux
         ├── install-codex-profiles.sh
@@ -90,366 +101,267 @@ The scripts never intentionally copy or link `auth.json`.
         └── check-codex-profiles.sh
 ```
 
----
+# Windows: easiest setup
 
-# Windows setup
+## 1. Run the batch file
 
-## 1. Verify Codex CLI
-
-```powershell
-codex --version
-```
-
-If needed:
-
-```powershell
-npm install -g @openai/codex
-```
-
-Close and reopen PowerShell after installation.
-
-## 2. Install the profile commands
-
-Run from the repository folder:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-codex-profiles.ps1
-. $PROFILE
-```
-
-The installer creates:
+Double-click:
 
 ```text
-%USERPROFILE%\.codex
-%USERPROFILE%\.codex-plus-1
-%USERPROFILE%\.codex-plus-2
-%USERPROFILE%\.codex-plus-3
-%USERPROFILE%\.codex-plus-4
-%USERPROFILE%\.codex-shared-history
+setup-codex-accounts.bat
 ```
 
-It adds these PowerShell functions:
+or from Command Prompt:
+
+```bat
+setup-codex-accounts.bat
+```
+
+Enter the number of accounts when prompted.
+
+You can also provide the count directly:
+
+```bat
+setup-codex-accounts.bat 6
+```
+
+The batch file checks for Codex CLI. If it is missing and `npm` is available, it can install `@openai/codex` after asking permission.
+
+## 2. Login
+
+The batch file checks each profile with `codex login status` under that profile's own `CODEX_HOME`. A successful existing login is **left untouched**. It also conservatively preserves an existing `auth.json` rather than automatically overwriting/relogging it if the status check fails. The browser login flow is offered only for profiles that are confirmed to need login.
+
+Example: if `codex1` through `codex4` are already logged in and you rerun the BAT with a total count of `5`, their existing authentication is preserved, only `.codex-plus-5` is added, all five profiles are connected to the shared history, and only `codex5` is offered for login. Existing file-backed logins keep their `auth.json`; an already-working keyring/auto-backed profile keeps its credential-store configuration instead of being forcibly switched and broken.
+
+For account 1 it temporarily uses:
 
 ```text
-codex1
-codex2
-codex3
-codex4
-codexui
-codexsharedstatus
+CODEX_HOME=%USERPROFILE%\.codex-plus-1
 ```
 
-## 3. Log in to all four accounts
+For account 2:
 
-Account 1:
+```text
+CODEX_HOME=%USERPROFILE%\.codex-plus-2
+```
+
+and so on.
+
+If you skip login during setup, use PowerShell later:
+
+```powershell
+$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-1"
+codex login
+```
+
+Repeat with the desired account number.
+
+For a headless machine, Codex also supports device-code login:
 
 ```powershell
 $env:CODEX_HOME="$env:USERPROFILE\.codex-plus-1"
 codex login --device-auth
 ```
 
-Account 2:
+Device-code login may need to be enabled for the ChatGPT account/workspace.
+
+## 3. Use the profiles
+
+Open a **new PowerShell window** after setup.
+
+Examples when you configured 6 accounts:
 
 ```powershell
-$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-2"
-codex login --device-auth
-```
-
-Account 3:
-
-```powershell
-$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-3"
-codex login --device-auth
-```
-
-Account 4:
-
-```powershell
-$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-4"
-codex login --device-auth
-```
-
-Check them:
-
-```powershell
-codex1 login status
-codex2 login status
-codex3 login status
-codex4 login status
-```
-
-## 4. Enable shared live history
-
-Close Codex CLI, the Codex desktop app, and any IDE extension using Codex. Then run:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\use-live-shared-history.ps1
-```
-
-This creates a timestamped backup, merges existing sessions from every profile, and creates shared links.
-
-To share session folders without linking `history.jsonl`:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\use-live-shared-history.ps1 -NoHistoryLink
-```
-
-## 5. Use the accounts
-
-```powershell
-codex1 resume --all
-codex2 resume --all
-codex3 resume --all
-codex4 resume --all
-codexui resume --all
-```
-
-Check profile and link status:
-
-```powershell
-codexsharedstatus
-```
-
-Or run the standalone checker:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\check-codex-profiles.ps1
-```
-
----
-
-# Linux setup
-
-## 1. Verify Codex CLI
-
-```bash
-codex --version
-```
-
-If needed:
-
-```bash
-npm install -g @openai/codex
-```
-
-## 2. Install the shell functions
-
-Run from the repository folder:
-
-```bash
-bash ./scripts/linux/install-codex-profiles.sh
-source "$HOME/.codex-switcher/codex-functions.sh"
-```
-
-The installer creates:
-
-```text
-~/.codex
-~/.codex-plus-1
-~/.codex-plus-2
-~/.codex-plus-3
-~/.codex-plus-4
-~/.codex-shared-history
-```
-
-## 3. Log in to all four accounts
-
-```bash
-CODEX_HOME="$HOME/.codex-plus-1" codex login --device-auth
-CODEX_HOME="$HOME/.codex-plus-2" codex login --device-auth
-CODEX_HOME="$HOME/.codex-plus-3" codex login --device-auth
-CODEX_HOME="$HOME/.codex-plus-4" codex login --device-auth
-```
-
-Check them:
-
-```bash
-codex1 login status
-codex2 login status
-codex3 login status
-codex4 login status
-```
-
-## 4. Enable shared live history
-
-Close all Codex CLI/UI/IDE processes, then run:
-
-```bash
-bash ./scripts/linux/use-live-shared-history.sh
-```
-
-To skip linking `history.jsonl`:
-
-```bash
-bash ./scripts/linux/use-live-shared-history.sh --no-history-link
-```
-
-## 5. Use the accounts
-
-```bash
-codex1 resume --all
-codex2 resume --all
-codex3 resume --all
-codex4 resume --all
-codexui resume --all
-codexsharedstatus
-```
-
-Or run the standalone checker:
-
-```bash
-bash ./scripts/linux/check-codex-profiles.sh
-```
-
----
-
-# Daily commands
-
-Start a new session:
-
-```bash
 codex1
 codex2
 codex3
 codex4
+codex5
+codex6
 ```
 
-Resume the last session:
+Generic form:
 
-```bash
-codex1 resume --last
-codex2 resume --last
-codex3 resume --last
-codex4 resume --last
+```powershell
+codexaccount 6
 ```
 
-Resume from the full session list:
+Resume from the shared session list:
 
-```bash
+```powershell
 codex1 resume --all
-codex2 resume --all
-codex3 resume --all
-codex4 resume --all
+codex6 resume --all
+codexui resume --all
 ```
 
-Check login status:
-
-```bash
-codex1 login status
-codex2 login status
-codex3 login status
-codex4 login status
-codexui login status
-```
-
----
-
-# Concurrency warning
-
-Do not open and modify the same conversation from multiple profiles at the same time.
-
-Because `codex1`, `codex2`, `codex3`, `codex4`, and `codexui` share the same live session files, simultaneous writers can conflict. Exit one Codex process before continuing the same conversation through another account.
-
----
-
-# Updating an older two- or three-account installation
-
-The installers replace the old marked switcher block, so upgrading is straightforward.
-
-Windows:
+Check everything:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-codex-profiles.ps1
-. $PROFILE
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\use-live-shared-history.ps1
+codexsharedstatus
 ```
 
-Linux:
-
-```bash
-bash ./scripts/linux/install-codex-profiles.sh
-source "$HOME/.codex-switcher/codex-functions.sh"
-bash ./scripts/linux/use-live-shared-history.sh
-```
-
-Your existing profiles remain in place. The scripts add any missing `.codex-plus-3` and `.codex-plus-4` profiles, preserve separate authentication, merge existing sessions from all accounts, and connect every profile to the shared store.
-
----
-
-# Troubleshooting
-
-## `codex1`, `codex2`, `codex3`, or `codex4` is not recognized
-
-Windows:
-
-```powershell
-. $PROFILE
-```
-
-If needed, reinstall:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-codex-profiles.ps1
-. $PROFILE
-```
-
-Linux:
-
-```bash
-source "$HOME/.codex-switcher/codex-functions.sh"
-```
-
-## PowerShell says script execution is disabled
-
-Use a one-run bypass:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-codex-profiles.ps1
-```
-
-## Deleted conversations return
-
-An old copy/merge synchronization function may still be installed. On Windows:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\remove-old-copy-sync-block.ps1
-. $PROFILE
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\use-live-shared-history.ps1
-```
-
-## Links cannot be created
-
-Close Codex CLI, desktop app, and IDE extensions. Then rerun the shared-history script. On Windows, Administrator PowerShell may be required if Junction creation is restricted.
-
-## Inspect the setup
-
-Windows:
+or:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\check-codex-profiles.ps1
 ```
 
-Linux:
+# Windows: manual / scripted setup
+
+Install or change the account count:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-codex-profiles.ps1 -AccountCount 8
+```
+
+Enable shared live history without an interactive close-session pause:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\use-live-shared-history.ps1 -AccountCount 8 -Force
+```
+
+Share the session directories without linking `history.jsonl`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\use-live-shared-history.ps1 -AccountCount 8 -NoHistoryLink
+```
+
+The selected count is saved at:
+
+```text
+%USERPROFILE%\.codex-switcher\account-count.txt
+```
+
+Later runs can omit `-AccountCount`; the scripts reuse the saved value.
+
+## Changing the number of accounts
+
+Re-run the batch file and enter the new count, or re-run the installer with another `-AccountCount`.
+
+Increasing the count is additive: it creates only the missing profile homes/helper commands. Existing profile directories, existing `auth.json` files, and existing correct shared-history links are preserved.
+
+By default, Windows setup also refuses to silently shrink below the saved/discovered highest profile number. This protects an existing `codex1`...`codexN` setup from being accidentally unmanaged. The low-level installer supports `-AllowDecrease` if you intentionally want a smaller managed helper set; even then it does **not** delete profile directories or `auth.json`.
+
+# Linux / macOS-like shells
+
+Install for a specific number of accounts:
+
+```bash
+bash ./scripts/linux/install-codex-profiles.sh 6
+source "$HOME/.codex-switcher/codex-functions.sh"
+```
+
+Login:
+
+```bash
+CODEX_HOME="$HOME/.codex-plus-1" codex login
+CODEX_HOME="$HOME/.codex-plus-2" codex login
+# repeat through the configured count
+```
+
+Enable shared live history:
+
+```bash
+bash ./scripts/linux/use-live-shared-history.sh --accounts 6
+```
+
+Or, after the count has been saved by the installer:
+
+```bash
+bash ./scripts/linux/use-live-shared-history.sh
+```
+
+Check the setup:
 
 ```bash
 bash ./scripts/linux/check-codex-profiles.sh
 ```
 
----
+Use:
 
-# Rollback
+```bash
+codex1
+codex6
+codexaccount 6
+codexui
+codexsharedstatus
+```
 
-The shared-history scripts create a backup before replacing profile session folders. The folder name resembles:
+# Concurrency warning
+
+Do not modify the **same conversation** from two profiles at the same time.
+
+All configured profiles share the same live local session files. Simultaneous writers can conflict. Exit or stop one Codex process before continuing the same conversation through another account.
+
+# Backups and rollback
+
+The shared-history scripts create a timestamped backup before replacing local session folders. The folder looks like:
 
 ```text
-codex-backup-before-shared-links-20260724-190000
+codex-backup-before-shared-links-YYYYMMDD-HHMMSS
 ```
 
 To roll back:
 
-1. Close every Codex process.
-2. Remove the `sessions`, `archived_sessions`, and linked `history.jsonl` entries from each profile.
-3. Restore the desired data from the timestamped backup.
-4. Remove or reinstall the marked switcher block in your PowerShell profile or shell configuration.
+1. close all Codex processes
+2. remove the linked/junction `sessions`, `archived_sessions`, and linked `history.jsonl` entries from the profiles
+3. restore the desired data from the timestamped backup
+4. remove or reinstall the marked switcher block in your shell profile
 
-Do not delete `auth.json` unless you intentionally want to remove that account’s local login.
+Do **not** delete an `auth.json` unless you intentionally want to remove that profile's local login.
+
+# Troubleshooting
+
+## `codexN` is not recognized
+
+Open a new PowerShell window after running the installer.
+
+Or reload your profile:
+
+```powershell
+. $PROFILE
+```
+
+## PowerShell execution policy blocks a script
+
+Use a one-run bypass:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-codex-profiles.ps1 -AccountCount 4
+```
+
+The provided `.bat` already uses a one-process execution-policy bypass for its helper scripts.
+
+## Force mode / locked files
+
+The BAT now calls the sharing script with `-Force` and does **not** stop at a “close Codex” pause. It also leaves already-correct junctions/hardlinks in place, so adding a new account normally touches only the new profile.
+
+`-Force` means “attempt the update immediately”; it cannot override an exclusive Windows filesystem lock. If Windows specifically reports that a file is in use, close the process holding that file and rerun. On some managed Windows machines, junction/hardlink creation may also be restricted by policy.
+
+## Login is going into the wrong profile
+
+Check `CODEX_HOME` before running `codex login`:
+
+```powershell
+$env:CODEX_HOME
+```
+
+For account 3 it should be:
+
+```text
+%USERPROFILE%\.codex-plus-3
+```
+
+## Deleted conversations return
+
+If you used an older copy/merge version of this project, remove the old marked block and reinstall:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\remove-old-copy-sync-block.ps1
+```
+
+Then re-run the live-history script.
+
+# Notes
+
+This project shares **local Codex history**, not remote ChatGPT web conversation history. It does not merge accounts, subscriptions, workspaces, entitlements, or credentials.
