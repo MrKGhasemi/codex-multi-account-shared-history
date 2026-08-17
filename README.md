@@ -4,10 +4,6 @@ Use **any practical number of Codex CLI / ChatGPT logins on one machine** while 
 
 > This is a local helper project. It is not an official OpenAI product.
 
-## What changed
-
-The project is no longer hard-coded to four accounts.
-
 On Windows, run:
 
 ```bat
@@ -25,7 +21,7 @@ The batch file asks how many accounts you want (1-99), then:
 7. offers login only for newly added/unlogged profiles
 8. prints a final status check
 
-It does **not** create ChatGPT accounts for you. You must already have the accounts you want to sign in with.
+It does **not** create ChatGPT accounts. You must already have the accounts you want to sign in with.
 
 ## How it works
 
