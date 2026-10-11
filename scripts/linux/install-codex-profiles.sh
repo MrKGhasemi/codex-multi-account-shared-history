@@ -77,7 +77,27 @@ _codex_with_home() {
   fi
 
   export CODEX_HOME="\$new_home"
-  codex "\$@"
+  if [ "\${1:-}" = "resume" ]; then
+    local has_non_interactive=0 arg
+    for arg in "\$@"; do
+      [ "\$arg" = "--include-non-interactive" ] && has_non_interactive=1
+    done
+    local has_no_daemon=0
+    for arg in "\$@"; do
+      [ "\$arg" = "--no-daemon" ] && has_no_daemon=1
+    done
+    if [ "\$has_non_interactive" -eq 0 ] && [ "\$has_no_daemon" -eq 0 ]; then
+      codex --no-daemon resume --include-non-interactive "\${@:2}"
+    elif [ "\$has_non_interactive" -eq 0 ]; then
+      codex --no-daemon resume --include-non-interactive "\${@:2}"
+    elif [ "\$has_no_daemon" -eq 0 ]; then
+      codex --no-daemon resume "\${@:2}"
+    else
+      codex --no-daemon "\$@"
+    fi
+  else
+    codex --no-daemon "\$@"
+  fi
   local status=\$?
 
   if [ "\$had_old" -eq 1 ]; then

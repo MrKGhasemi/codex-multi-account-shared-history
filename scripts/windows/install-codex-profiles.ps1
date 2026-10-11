@@ -210,7 +210,28 @@ function Invoke-CodexWithHome {
     $oldCodexHome = $env:CODEX_HOME
     try {
         $env:CODEX_HOME = $CodexHome
-        & codex @CodexArgs
+        $effectiveArgs = @($CodexArgs)
+        # Include desktop-created sessions in the normal shared-store picker.
+        if ($effectiveArgs.Count -gt 0 -and [string]$effectiveArgs[0] -eq "resume") {
+            $resumeExtras = @()
+            if ($effectiveArgs -notcontains "--include-non-interactive") {
+                $resumeExtras += "--include-non-interactive"
+            }
+            if ($effectiveArgs -notcontains "--no-daemon") {
+                $resumeExtras += "--no-daemon"
+            }
+            if ($resumeExtras.Count -gt 0) {
+                if ($effectiveArgs.Count -eq 1) {
+                    $effectiveArgs = @("resume") + $resumeExtras
+                } else {
+                    $effectiveArgs = @("resume") + $resumeExtras + @($effectiveArgs[1..($effectiveArgs.Count - 1)])
+                }
+            }
+        }
+        if ($effectiveArgs -notcontains "--no-daemon") {
+            $effectiveArgs = @("--no-daemon") + $effectiveArgs
+        }
+        & codex @effectiveArgs
     }
     finally {
         if ($null -eq $oldCodexHome) {
@@ -269,7 +290,7 @@ function codexsharedstatus {
     foreach ($h in $homes) {
         Write-Host ""
         Write-Host "[$($h.Name)] $($h.Path)"
-        foreach ($child in @("auth.json", "config.toml", "history.jsonl", "sessions", "archived_sessions")) {
+        foreach ($child in @("auth.json", "config.toml", "history.jsonl", "session_index.jsonl", "state_5.sqlite", "sessions", "archived_sessions")) {
             $p = Join-Path $h.Path $child
             if (Test-Path $p) {
                 $item = Get-Item -LiteralPath $p -Force
@@ -334,5 +355,5 @@ if ($AccountCount -gt 1) {
     Write-Host "  ... through codex$AccountCount resume --all"
 }
 Write-Host "  codexaccount <number> resume --all"
-Write-Host "  codexui resume --all"
+Write-Host "  codexui resume --all --include-non-interactive"
 Write-Host "  codexsharedstatus"

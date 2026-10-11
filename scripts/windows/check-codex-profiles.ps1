@@ -40,7 +40,7 @@ try {
 foreach ($h in $Homes) {
     Write-Host ""
     Write-Host "[$($h.Name)] $($h.Path)"
-    foreach ($child in @("auth.json", "config.toml", "history.jsonl", "sessions", "archived_sessions")) {
+    foreach ($child in @("auth.json", "config.toml", "history.jsonl", "session_index.jsonl", "state_5.sqlite", "sessions", "archived_sessions")) {
         $p = Join-Path $h.Path $child
         if (Test-Path $p) {
             $item = Get-Item -LiteralPath $p -Force

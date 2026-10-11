@@ -6,9 +6,11 @@
 .DESCRIPTION
   For every configured profile, this script:
     - merges existing sessions and archived sessions into .codex-shared-history
-    - merges unique history.jsonl lines
+    - merges unique history.jsonl and session_index.jsonl lines
+    - rebuilds one shared SQLite thread inventory from the shared rollouts
+    - configures every profile to use the shared sqlite_home
     - creates directory junctions for sessions and archived_sessions when needed
-    - creates a hardlink for history.jsonl when needed unless -NoHistoryLink is used
+    - creates hardlinks for history.jsonl and session_index.jsonl when needed
 
   Authentication is never copied or linked.
 
@@ -203,6 +205,44 @@ function Merge-JsonlUnique {
     [System.IO.File]::WriteAllLines($Destination, $out)
 }
 
+function Set-SharedSqliteHomeConfig {
+    param([string]$ProfileHome, [string]$SqliteHome)
+
+    $configPath = Join-Path $ProfileHome "config.toml"
+    $escaped = $SqliteHome.Replace('\', '\\')
+    $line = 'sqlite_home = "' + $escaped + '"'
+    $content = if (Test-Path $configPath) { Get-Content -LiteralPath $configPath -Raw } else { "" }
+    if ($null -eq $content) { $content = "" }
+    # sqlite_home is a top-level TOML key. Remove any previous copy (including
+    # an older incorrectly nested copy) and prepend the new key before tables.
+    $pattern = '(?m)^\s*sqlite_home\s*=.*(?:\r?\n|$)'
+    $content = [regex]::Replace($content, $pattern, "")
+    $content = $line + "`r`n" + $content.TrimStart()
+    Set-Content -LiteralPath $configPath -Value $content -Encoding UTF8
+}
+
+function Initialize-SharedSqliteState {
+    param([string]$ProfileHome, [string]$SqliteHome)
+
+    New-Item -ItemType Directory -Force -Path $SqliteHome | Out-Null
+    if (!(Get-Command codex -ErrorAction SilentlyContinue)) {
+        throw "Codex CLI is required to initialize the shared SQLite session index."
+    }
+
+    $oldCodexHome = $env:CODEX_HOME
+    try {
+        $env:CODEX_HOME = $ProfileHome
+        $override = 'sqlite_home="' + $SqliteHome.Replace('\', '\\') + '"'
+        & codex -c $override migrate-rollouts --apply --json *> $null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Codex could not initialize the shared SQLite session index (exit code $LASTEXITCODE)."
+        }
+    } finally {
+        if ($null -eq $oldCodexHome) { Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue }
+        else { $env:CODEX_HOME = $oldCodexHome }
+    }
+}
+
 $AccountCount = Resolve-AccountCount -Requested $AccountCount
 $CodexUiHome = Join-Path $env:USERPROFILE ".codex"
 $CodexSharedHome = Join-Path $env:USERPROFILE ".codex-shared-history"
@@ -216,6 +256,8 @@ $BackupRoot = Join-Path $env:USERPROFILE ("codex-backup-before-shared-links-" + 
 $SharedSessions = Join-Path $CodexSharedHome "sessions"
 $SharedArchived = Join-Path $CodexSharedHome "archived_sessions"
 $SharedHistory = Join-Path $CodexSharedHome "history.jsonl"
+$SharedSessionIndex = Join-Path $CodexSharedHome "session_index.jsonl"
+$SharedSqliteHome = Join-Path $CodexSharedHome "sqlite"
 
 New-Item -ItemType Directory -Force -Path $SharedSessions | Out-Null
 New-Item -ItemType Directory -Force -Path $SharedArchived | Out-Null
@@ -237,6 +279,14 @@ if (Test-Path $SharedHistory) {
     $HistorySources += $SharedHistory
 }
 
+# The resume picker also uses session_index.jsonl. Share it alongside the
+# rollout folders so every profile discovers the same sessions.
+$IndexSources = @()
+$DistinctIndexFound = $false
+if (Test-Path $SharedSessionIndex) {
+    $IndexSources += $SharedSessionIndex
+}
+
 foreach ($h in $Homes) {
     New-Item -ItemType Directory -Force -Path $h | Out-Null
 
@@ -247,6 +297,7 @@ foreach ($h in $Homes) {
     $sessions = Join-Path $h "sessions"
     $archived = Join-Path $h "archived_sessions"
     $history = Join-Path $h "history.jsonl"
+    $sessionIndex = Join-Path $h "session_index.jsonl"
 
     if (Test-Path $sessions) {
         if (!(Test-LinkTargetsDirectory -Path $sessions -ExpectedTarget $SharedSessions)) {
@@ -270,6 +321,15 @@ foreach ($h in $Homes) {
             $DistinctHistoryFound = $true
         }
     }
+
+    if (Test-Path $sessionIndex) {
+        $alreadySharedIndex = (Test-Path $SharedSessionIndex) -and (Test-HardLinkTargetsFile -Path $sessionIndex -ExpectedTarget $SharedSessionIndex)
+        if (!$alreadySharedIndex) {
+            Copy-Item $sessionIndex $backupHome -Force -ErrorAction SilentlyContinue
+            $IndexSources += $sessionIndex
+            $DistinctIndexFound = $true
+        }
+    }
 }
 
 if (!(Test-Path $SharedHistory)) {
@@ -287,12 +347,34 @@ if (!(Test-Path $SharedHistory)) {
     Write-Host "Existing history.jsonl is already shared; no history rewrite needed."
 }
 
+if (!(Test-Path $SharedSessionIndex)) {
+    if ($IndexSources.Count -gt 0) {
+        Merge-JsonlUnique -Sources $IndexSources -Destination $SharedSessionIndex
+    } else {
+        New-Item -ItemType File -Force -Path $SharedSessionIndex | Out-Null
+    }
+} elseif ($DistinctIndexFound) {
+    Merge-JsonlUnique -Sources $IndexSources -Destination $SharedSessionIndex
+} else {
+    Write-Host "Existing session_index.jsonl is already shared; no index rewrite needed."
+}
+
+# The current picker reads the SQLite thread inventory in addition to the
+# rollout files. Build that inventory from the shared rollouts, then point
+# every profile at the same sqlite_home so UI and CLI discover the same rows.
+Initialize-SharedSqliteState -ProfileHome $CodexUiHome -SqliteHome $SharedSqliteHome
+foreach ($h in $Homes) {
+    Set-SharedSqliteHomeConfig -ProfileHome $h -SqliteHome $SharedSqliteHome
+}
+Write-Host "Shared SQLite session state: $SharedSqliteHome"
+
 foreach ($h in $Homes) {
     New-Item -ItemType Directory -Force -Path $h | Out-Null
 
     $sessions = Join-Path $h "sessions"
     $archived = Join-Path $h "archived_sessions"
     $history = Join-Path $h "history.jsonl"
+    $sessionIndex = Join-Path $h "session_index.jsonl"
 
     if (!(Test-LinkTargetsDirectory -Path $sessions -ExpectedTarget $SharedSessions)) {
         Remove-PathWithoutFollowingJunction -Path $sessions
@@ -313,6 +395,14 @@ foreach ($h in $Homes) {
         New-Item -ItemType HardLink -Path $history -Target $SharedHistory | Out-Null
         Write-Host "Linked history.jsonl: $h"
     }
+
+    if (!(Test-HardLinkTargetsFile -Path $sessionIndex -ExpectedTarget $SharedSessionIndex)) {
+        if (Test-Path $sessionIndex) {
+            Remove-Item -LiteralPath $sessionIndex -Force
+        }
+        New-Item -ItemType HardLink -Path $sessionIndex -Target $SharedSessionIndex | Out-Null
+        Write-Host "Linked session_index.jsonl: $h"
+    }
 }
 
 Write-Host ""
@@ -327,4 +417,5 @@ if ($AccountCount -gt 1) {
     Write-Host "  ... through codex$AccountCount resume --all"
 }
 Write-Host "  codexui resume --all"
+Write-Host "  (profile helpers automatically include non-interactive desktop sessions)"
 Write-Host "  codexsharedstatus"

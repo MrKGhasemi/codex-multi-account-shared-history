@@ -51,6 +51,7 @@ Only local conversation data is shared:
 sessions/
 archived_sessions/
 history.jsonl
+session_index.jsonl
 ```
 
 The shared store is:
@@ -59,9 +60,13 @@ The shared store is:
 ~/.codex-shared-history
 ```
 
-Every configured profile points at the same live session directories. On Windows, `sessions` and `archived_sessions` use directory junctions and `history.jsonl` uses a hardlink. On Linux, the project uses symbolic links.
+Every configured profile points at the same live session directories, session index, and SQLite thread inventory. On Windows, `sessions` and `archived_sessions` use directory junctions, while `history.jsonl` and `session_index.jsonl` use hardlinks. The profiles share a configured `sqlite_home` under `.codex-shared-history\sqlite`. On Linux, the project uses symbolic links.
 
 Because the profiles point to the same files, **there is no periodic copy-sync process**. New and resumed local sessions are visible across the configured profiles immediately.
+
+Run `setup-codex-accounts.bat` once for the desired account count. After it finishes, the links and PowerShell helpers persist across restarts; normal UI/CLI changes are written to the same shared store automatically. You only need to run setup again when adding accounts, repairing links, or intentionally changing the configuration.
+
+The setup also places the session inventory in `.codex-shared-history\sqlite` through Codex's `sqlite_home` setting. This is required by current Codex releases: rollout files alone are insufficient for the resume picker. Close and reopen the desktop UI once after the first setup so it loads the shared SQLite state.
 
 ## Security model
 
@@ -361,3 +366,25 @@ Then re-run the live-history script.
 # Notes
 
 This project shares **local Codex history**, not remote ChatGPT web conversation history. It does not merge accounts, subscriptions, workspaces, entitlements, or credentials.
+
+### Desktop projects are not CLI resume entries
+
+The Codex desktop app and the Codex CLI write different session sources. Desktop sessions commonly have metadata such as `source: "vscode"` and `originator: "Codex Desktop"`. The default CLI resume picker can omit those sessions even when their files are present in the shared `sessions` directory. Use the current CLI's opt-in flag when checking the complete local store:
+
+```powershell
+codexui resume --all --include-non-interactive
+```
+
+This can reveal sessions that the normal picker hides. It still cannot turn a cloud project belonging to another account into a session for the account currently logged into the UI.
+
+The shared-history scripts cannot merge cloud project ownership between accounts. To have a conversation available in both clients, keep the UI and CLI on the same account and use the same `CODEX_HOME`/linked session store. Seeing multiple files under `sessions` proves that the data was copied/shared; the picker may still need `--include-non-interactive` to display all of them.
+
+After reinstalling the profile helper, its `codex1`...`codexN` and `codexui` commands use `--no-daemon` so every CLI invocation reads the shared SQLite state instead of a stale per-profile daemon. They also add `--include-non-interactive` for `resume`. Restart the desktop UI once after setup so it reloads the shared `sqlite_home`; no recurring sync command is required.
+
+The setup also shares `session_index.jsonl`, which the current CLI uses to populate the resume picker. If the UI shows more sessions than a CLI profile after that index is shared, the remaining filter is account identity: a CLI profile logged into another account may only list sessions owned by that account. File links cannot remove that server-side/account filter. Use `codexui` and the CLI profile logged into the same account when both clients must show the same conversations.
+
+### Switching the account in the desktop UI
+
+Logging out of the desktop UI and signing in with another account changes the account whose cloud projects and chats the UI requests. The previous account's projects can therefore disappear from the sidebar while that account is signed out. The shared local session files are not an account switch mechanism, and linking them cannot make one account's cloud chats visible to another account.
+
+Before diagnosing this as data loss, sign back into the original account and check the UI there, then check the shared store with `codexsharedstatus`. The sharing scripts do not remove `sessions` or `archived_sessions` during a normal rerun; if the files remain in `.codex-shared-history`, the UI is applying account visibility rather than the local sessions being deleted. Keep separate account logins for account-specific projects and use the shared store only for local CLI session files.

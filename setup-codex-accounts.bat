@@ -128,6 +128,15 @@ echo   codexsharedstatus
 echo.
 echo Existing authentication was kept. Only profiles confirmed missing login were offered login.
 echo All configured profiles share the same live local session/history store.
+echo The SQLite thread index is shared too, so the UI and CLI use the same picker data.
+echo This is a one-time setup for the configured profiles. New session changes
+echo are shared automatically after restarting the other client; do not rerun
+echo this file for normal UI/CLI use.
+echo The UI and a CLI profile must use the same account to show the same chats.
+echo Resume helpers automatically include desktop-created sessions for every profile:
+echo   codex1 resume --all
+if %ACCOUNT_COUNT% GTR 1 echo   ... through codex%ACCOUNT_COUNT% resume --all
+echo   codexui resume --all
 echo ============================================================
 echo.
 pause
