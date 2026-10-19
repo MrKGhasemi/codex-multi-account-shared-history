@@ -118,18 +118,18 @@ function Set-FileCredentialStore {
 
     $content = Get-Content -LiteralPath $configPath -Raw
     if ($null -eq $content) { $content = "" }
-    $pattern = '(?m)^\s*cli_auth_credentials_store\s*=.*$'
-    if ([regex]::IsMatch($content, $pattern)) {
-        $content = [regex]::Replace($content, $pattern, $requiredLine)
-    } else {
-        $content = $content.TrimEnd() + "`r`n" + $requiredLine + "`r`n"
-    }
+    # This is a root TOML key, not a setting belonging to the last table.
+    $pattern = '(?m)^\s*cli_auth_credentials_store\s*=.*(?:\r?\n|$)'
+    $content = $requiredLine + "`r`n" + [regex]::Replace($content, $pattern, '').TrimStart()
     Set-Content -LiteralPath $configPath -Value $content -Encoding UTF8
 }
 
 $AccountCount = Resolve-AccountCount -Requested $AccountCount -CanDecrease:$AllowDecrease
 
 New-Item -ItemType Directory -Force -Path $SwitcherDir | Out-Null
+foreach ($repairFile in @('repair-shared-history.py', 'repair-shared-history.ps1', 'shared-store.ps1', 'seed-shared-sqlite.py')) {
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot $repairFile) -Destination (Join-Path $SwitcherDir $repairFile) -Force
+}
 Set-Content -LiteralPath $CountFile -Value $AccountCount -Encoding ASCII
 
 $ProfilePath = $PROFILE
@@ -197,6 +197,8 @@ $BlockTemplate = @'
 $global:CodexAccountCount = __COUNT__
 $global:CodexUiHome = Join-Path $env:USERPROFILE ".codex"
 $global:CodexSharedHome = Join-Path $env:USERPROFILE ".codex-shared-history"
+$global:CodexStoreSupport = Join-Path $env:USERPROFILE '.codex-switcher\shared-store.ps1'
+. $global:CodexStoreSupport
 
 function Invoke-CodexWithHome {
     param(
@@ -209,6 +211,9 @@ function Invoke-CodexWithHome {
 
     $oldCodexHome = $env:CODEX_HOME
     try {
+        . $global:CodexStoreSupport
+        Assert-CodexSharedStore -ProfileHome $CodexHome -UiHome $global:CodexUiHome -SharedHome $global:CodexSharedHome
+        Assert-CodexSharedArguments -Arguments $CodexArgs
         $env:CODEX_HOME = $CodexHome
         $effectiveArgs = @($CodexArgs)
         # Include desktop-created sessions in the normal shared-store picker.
@@ -231,7 +236,9 @@ function Invoke-CodexWithHome {
         if ($effectiveArgs -notcontains "--no-daemon") {
             $effectiveArgs = @("--no-daemon") + $effectiveArgs
         }
-        & codex @effectiveArgs
+        $runtime = Get-CodexSharedRuntime -UiHome $global:CodexUiHome
+        $sqliteOverride = 'sqlite_home="' + (Join-Path $global:CodexSharedHome 'sqlite').Replace('\', '\\') + '"'
+        & $runtime -c $sqliteOverride @effectiveArgs
     }
     finally {
         if ($null -eq $oldCodexHome) {
@@ -290,7 +297,7 @@ function codexsharedstatus {
     foreach ($h in $homes) {
         Write-Host ""
         Write-Host "[$($h.Name)] $($h.Path)"
-        foreach ($child in @("auth.json", "config.toml", "history.jsonl", "session_index.jsonl", "state_5.sqlite", "sessions", "archived_sessions")) {
+        foreach ($child in @("auth.json", "config.toml", "history.jsonl", "session_index.jsonl", "sessions", "archived_sessions", "thread-writer-locks")) {
             $p = Join-Path $h.Path $child
             if (Test-Path $p) {
                 $item = Get-Item -LiteralPath $p -Force
@@ -330,6 +337,23 @@ $Pattern = "(?s)# >>> Codex multi-account shared-history switcher >>>.*?# <<< Co
 $Content = [regex]::Replace($Content, $Pattern, "").TrimEnd()
 
 Set-Content -Path $ProfilePath -Value ($Content + "`r`n`r`n" + $Block + "`r`n") -Encoding UTF8
+
+# The BAT runs Windows PowerShell, but users may open PowerShell 7 afterward.
+# Install the same safeguards in both shells, preserving their other content.
+$documents = [Environment]::GetFolderPath('MyDocuments')
+foreach ($shellDirectory in @('WindowsPowerShell', 'PowerShell')) {
+    $otherProfile = Join-Path $documents "$shellDirectory\Microsoft.PowerShell_profile.ps1"
+    if ($otherProfile -eq $ProfilePath) { continue }
+    New-Item -ItemType Directory -Force -Path (Split-Path $otherProfile -Parent) | Out-Null
+    $otherContent = ''
+    if (Test-Path -LiteralPath $otherProfile) {
+        $otherContent = Get-Content -LiteralPath $otherProfile -Raw
+        Copy-Item -LiteralPath $otherProfile -Destination "$otherProfile.bak-$(Get-Date -Format yyyyMMdd-HHmmss)" -Force
+    }
+    if ($null -eq $otherContent) { $otherContent = '' }
+    $otherContent = [regex]::Replace($otherContent, $Pattern, '').TrimEnd()
+    Set-Content -LiteralPath $otherProfile -Value ($otherContent + "`r`n`r`n" + $Block + "`r`n") -Encoding UTF8
+}
 
 Write-Host ""
 Write-Host "Installed Codex profile switcher for $AccountCount account(s)."

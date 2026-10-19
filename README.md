@@ -52,6 +52,8 @@ sessions/
 archived_sessions/
 history.jsonl
 session_index.jsonl
+sqlite/ (Windows)
+thread-writer-locks/ (Windows, canonical directory in ~/.codex)
 ```
 
 The shared store is:
@@ -60,11 +62,15 @@ The shared store is:
 ~/.codex-shared-history
 ```
 
-Every configured profile points at the same live session directories, session index, and SQLite thread inventory. On Windows, `sessions` and `archived_sessions` use directory junctions, while `history.jsonl` and `session_index.jsonl` use hardlinks. The profiles share a configured `sqlite_home` under `.codex-shared-history\sqlite`. On Linux, the project uses symbolic links.
+On Windows, every configured profile points at the same live session directories, session index, and SQLite thread inventory. On Windows, `sessions` and `archived_sessions` use directory junctions, while `history.jsonl` and `session_index.jsonl` use hardlinks. The profiles share a configured `sqlite_home` under `.codex-shared-history\sqlite`. The Linux scripts currently share rollout directories and command history through symbolic links; the Windows SQLite and writer-lock changes described here are not implemented by those Linux scripts.
 
-Because the profiles point to the same files, **there is no periodic copy-sync process**. New and resumed local sessions are visible across the configured profiles immediately.
+Because the profiles point to the same files, **there is no periodic copy-sync process**. New and resumed local sessions are written to shared storage; restart the other client to refresh its view.
 
 Run `setup-codex-accounts.bat` once for the desired account count. After it finishes, the links and PowerShell helpers persist across restarts; normal UI/CLI changes are written to the same shared store automatically. You only need to run setup again when adding accounts, repairing links, or intentionally changing the configuration.
+
+The Windows helpers check the UI and CLI storage links and UI SQLite configuration on every launch. If they have changed, the helper stops before starting Codex. Each launch explicitly selects the shared SQLite directory and the desktop engine, and rejects arguments that override that directory or select a remote app server. The installer adds these safeguards to both Windows PowerShell and PowerShell 7.
+
+First-time setup preserves the existing UI thread database and paginated message history before native migration. Existing shared databases are kept. When merging two copies of a rollout, setup accepts an identical file or an append-only extension; it stops on divergent contents instead of overwriting either conversation. Original profile folders are retained in the setup backup.
 
 The setup also places the session inventory in `.codex-shared-history\sqlite` through Codex's `sqlite_home` setting. This is required by current Codex releases: rollout files alone are insufficient for the resume picker. Close and reopen the desktop UI once after the first setup so it loads the shared SQLite state.
 
@@ -292,7 +298,7 @@ codexsharedstatus
 
 Do not modify the **same conversation** from two profiles at the same time.
 
-All configured profiles share the same live local session files. Simultaneous writers can conflict. Exit or stop one Codex process before continuing the same conversation through another account.
+All configured profiles share the same live local session files. On Windows, the shared native writer locks refuse a second writer for an already-open chat. Exit or close that chat in one client before continuing it through another account. The Linux scripts do not yet install this writer coordination.
 
 # Backups and rollback
 
@@ -337,7 +343,7 @@ The provided `.bat` already uses a one-process execution-policy bypass for its h
 
 The BAT now calls the sharing script with `-Force` and does **not** stop at a “close Codex” pause. It also leaves already-correct junctions/hardlinks in place, so adding a new account normally touches only the new profile.
 
-`-Force` means “attempt the update immediately”; it cannot override an exclusive Windows filesystem lock. If Windows specifically reports that a file is in use, close the process holding that file and rerun. On some managed Windows machines, junction/hardlink creation may also be restricted by policy.
+`-Force` skips the interactive pause; it cannot bypass writer safety. Setup holds the native coordination lock and refuses to merge or move a store with an active writer. Close the affected UI/CLI chats and rerun if setup reports an active writer. On some managed Windows machines, junction/hardlink creation may also be restricted by policy.
 
 ## Login is going into the wrong profile
 
@@ -375,16 +381,38 @@ The Codex desktop app and the Codex CLI write different session sources. Desktop
 codexui resume --all --include-non-interactive
 ```
 
-This can reveal sessions that the normal picker hides. It still cannot turn a cloud project belonging to another account into a session for the account currently logged into the UI.
+The Windows resume helpers add `--include-non-interactive` and `--no-daemon`, and use the installed desktop engine when available. Local chats can be shared between separately authenticated profiles; matching accounts is not required for this local store. Account-owned remote resources remain separate.
 
-The shared-history scripts cannot merge cloud project ownership between accounts. To have a conversation available in both clients, keep the UI and CLI on the same account and use the same `CODEX_HOME`/linked session store. Seeing multiple files under `sessions` proves that the data was copied/shared; the picker may still need `--include-non-interactive` to display all of them.
+### Saved messages disappear after restart
 
-After reinstalling the profile helper, its `codex1`...`codexN` and `codexui` commands use `--no-daemon` so every CLI invocation reads the shared SQLite state instead of a stale per-profile daemon. They also add `--include-non-interactive` for `resume`. Restart the desktop UI once after setup so it reloads the shared `sqlite_home`; no recurring sync command is required.
+Sharing rollout folders and the picker database is insufficient if each profile has independent `thread-writer-locks`. Two clients can then write the same chat with duplicate or regressed rollout ordinals. Codex skips those records when projecting paginated history, so messages can exist on disk while disappearing from the visible chat.
 
-The setup also shares `session_index.jsonl`, which the current CLI uses to populate the resume picker. If the UI shows more sessions than a CLI profile after that index is shared, the remaining filter is account identity: a CLI profile logged into another account may only list sessions owned by that account. File links cannot remove that server-side/account filter. Use `codexui` and the CLI profile logged into the same account when both clients must show the same conversations.
+The Windows setup now links every CLI's writer-lock directory to the desktop's existing lock directory. It also uses the desktop engine in the generated CLI helpers for storage format compatibility. Use one active writer per chat. Close that chat in the other client before continuing it; do not bypass a writer-lock error.
+
+For existing damaged history, setup installs and queues a single recovery worker. It waits until all UI/CLI thread writers close, saves SQLite snapshots and original rollouts, restores missing older cached history, and rebuilds damaged threads through Codex's native migration in an isolated staging store before publishing the repair. It preserves chat IDs and does not change authentication. Close Codex and the CLI sessions once, allow recovery to finish, then reopen them. Setup uses the desktop bundled Python, or an installed Python 3.11 or newer.
+
+Recovery status is recorded in `%USERPROFILE%\.codex-switcher\history-recovery.log`; errors are in `history-recovery-errors.log`. A successful run ends with `Recovery complete`. Backups are under `history-recovery-backup-*` alongside the log. Do not reopen a writer while recovery is in progress. No recurring copy or recovery job is installed.
 
 ### Switching the account in the desktop UI
 
-Logging out of the desktop UI and signing in with another account changes the account whose cloud projects and chats the UI requests. The previous account's projects can therefore disappear from the sidebar while that account is signed out. The shared local session files are not an account switch mechanism, and linking them cannot make one account's cloud chats visible to another account.
+Authentication stays separate from the shared local session files and databases. Switching accounts does not delete those shared local files. This setup does not transfer remote project ownership, subscriptions, or credentials between accounts.
 
-Before diagnosing this as data loss, sign back into the original account and check the UI there, then check the shared store with `codexsharedstatus`. The sharing scripts do not remove `sessions` or `archived_sessions` during a normal rerun; if the files remain in `.codex-shared-history`, the UI is applying account visibility rather than the local sessions being deleted. Keep separate account logins for account-specific projects and use the shared store only for local CLI session files.
+## Regression checks (Windows)
+
+Run the launch-guard tests in Windows PowerShell and PowerShell 7:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\windows\shared-store.Tests.ps1
+pwsh -NoProfile -File .\tests\windows\shared-store.Tests.ps1
+```
+
+Run the native history tests with the same desktop engine and bundled Python used by setup:
+
+```powershell
+. .\scripts\windows\shared-store.ps1
+$testPython = Get-CodexSharedPython
+$testRuntime = Get-CodexSharedRuntime
+& $testPython .\tests\windows\native-history.py --runtime $testRuntime
+```
+
+These use isolated fixtures under `.diagnostics`, without credentials or model requests. They check saved messages after reopening both clients, recovery of regressed ordinals, refusal of concurrent writers, writer handoff after closing, preservation of cached history, and safe first-time setup including older CLI rollouts.

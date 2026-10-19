@@ -11,6 +11,7 @@
     - configures every profile to use the shared sqlite_home
     - creates directory junctions for sessions and archived_sessions when needed
     - creates hardlinks for history.jsonl and session_index.jsonl when needed
+    - shares thread writer locks with the desktop profile to prevent concurrent writers
 
   Authentication is never copied or linked.
 
@@ -37,6 +38,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 try { $global:PSNativeCommandUseErrorActionPreference = $false } catch {}
+. (Join-Path $PSScriptRoot 'shared-store.ps1')
+$SetupCoordination = $null
+trap {
+    if ($SetupCoordination) { $SetupCoordination.Dispose() }
+    throw $_
+}
 
 $SwitcherDir = Join-Path $env:USERPROFILE ".codex-switcher"
 $CountFile = Join-Path $SwitcherDir "account-count.txt"
@@ -86,10 +93,56 @@ function Invoke-RoboCopySafe {
 
     if (!(Test-Path $Source)) { return }
     New-Item -ItemType Directory -Force -Path $Destination | Out-Null
-    robocopy $Source $Destination /E /XO /FFT /R:1 /W:1 /NFL /NDL /NJH /NJS | Out-Null
-    $code = $LASTEXITCODE
-    if ($code -gt 7) {
-        throw "robocopy failed with exit code $code while copying '$Source' to '$Destination'"
+    # Timestamps cannot decide which conversation is complete. Preserve exact
+    # matches or append-only extensions; refuse divergent files with the same ID.
+    $sourceRoot = [IO.Path]::GetFullPath($Source).TrimEnd('\') + '\'
+    foreach ($file in Get-ChildItem -LiteralPath $Source -File -Recurse -Force) {
+        $relative = $file.FullName.Substring($sourceRoot.Length)
+        $target = Join-Path $Destination $relative
+        if (Test-Path -LiteralPath $target) {
+            $other = Get-Item -LiteralPath $target
+            $short = if ($file.Length -le $other.Length) { $file.FullName } else { $target }
+            $long = if ($file.Length -le $other.Length) { $target } else { $file.FullName }
+            if (!(Test-AppendOnlyExtension -ShortPath $short -LongPath $long)) {
+                throw "Conflicting conversation files: '$($file.FullName)' and '$target'. Both originals were kept; setup will not overwrite either."
+            }
+            if ($file.Length -le $other.Length) { continue }
+        }
+        New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
+        Copy-Item -LiteralPath $file.FullName -Destination $target -Force
+    }
+}
+
+function Test-AppendOnlyExtension {
+    param([string]$ShortPath, [string]$LongPath)
+    $shortStream = [IO.File]::OpenRead($ShortPath)
+    $longStream = [IO.File]::OpenRead($LongPath)
+    try {
+        $bufferA = New-Object byte[] 65536
+        $bufferB = New-Object byte[] 65536
+        while (($countA = $shortStream.Read($bufferA, 0, $bufferA.Length)) -gt 0) {
+            $countB = $longStream.Read($bufferB, 0, $countA)
+            if ($countB -ne $countA) { return $false }
+            # Compare chunks without converting private message data to output.
+            if ([Convert]::ToBase64String($bufferA,0,$countA) -cne [Convert]::ToBase64String($bufferB,0,$countB)) { return $false }
+        }
+        return $true
+    } finally { $shortStream.Dispose(); $longStream.Dispose() }
+}
+
+function Assert-NoActiveProfileWriter {
+    param([string]$ProfileHome)
+    $lockHome = Join-Path $ProfileHome 'thread-writer-locks'
+    if (!(Test-Path -LiteralPath $lockHome)) { return }
+    foreach ($file in Get-ChildItem -LiteralPath $lockHome -File -Force) {
+        if ($file.Name -eq '.coordination.lock') { continue } # setup owns the canonical coordination lock
+        $stream = $null
+        try {
+            $stream = [IO.File]::Open($file.FullName,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::ReadWrite)
+            $stream.Lock(0,1)
+            $stream.Unlock(0,1)
+        } catch { throw "Close the UI/CLI writer using '$ProfileHome' before changing its shared store. -Force cannot bypass writer safety." }
+        finally { if ($stream) { $stream.Dispose() } }
     }
 }
 
@@ -165,20 +218,19 @@ function Test-HardLinkTargetsFile {
     return $false
 }
 
-function Remove-PathWithoutFollowingJunction {
+function Move-ProfileSessionPathToBackup {
     param([Parameter(Mandatory=$true)][string]$Path)
 
     if (!(Test-Path $Path)) { return }
 
-    $item = Get-Item -LiteralPath $Path -Force
-    $isReparse = (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
-
-    if ($isReparse -and $item.PSIsContainer) {
-        cmd /c rmdir "$Path" | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "Could not remove junction '$Path'." }
-    } else {
-        Remove-Item -LiteralPath $Path -Recurse -Force
-    }
+    $resolved = [IO.Path]::GetFullPath($Path)
+    $allowed = @($Homes | ForEach-Object { Join-Path $_ 'sessions'; Join-Path $_ 'archived_sessions' })
+    if ($allowed -notcontains $resolved) { throw "Unexpected session path: $resolved" }
+    $parent = Join-Path $BackupRoot ('replaced-paths\' + [Guid]::NewGuid().ToString('N'))
+    $destination = [IO.Path]::GetFullPath((Join-Path $parent (Split-Path $resolved -Leaf)))
+    if (!$destination.StartsWith([IO.Path]::GetFullPath($BackupRoot) + '\',[StringComparison]::OrdinalIgnoreCase)) { throw 'Unexpected session backup path' }
+    New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    Move-Item -LiteralPath $resolved -Destination $destination
 }
 
 function Merge-JsonlUnique {
@@ -218,29 +270,78 @@ function Set-SharedSqliteHomeConfig {
     $pattern = '(?m)^\s*sqlite_home\s*=.*(?:\r?\n|$)'
     $content = [regex]::Replace($content, $pattern, "")
     $content = $line + "`r`n" + $content.TrimStart()
+    if ((Test-Path -LiteralPath $configPath) -and (Get-Content -LiteralPath $configPath -Raw).TrimEnd() -eq $content.TrimEnd()) { return }
     Set-Content -LiteralPath $configPath -Value $content -Encoding UTF8
 }
 
 function Initialize-SharedSqliteState {
-    param([string]$ProfileHome, [string]$SqliteHome)
+    param([string]$ProfileHome, [string]$SqliteHome, [switch]$RefreshInventory)
 
     New-Item -ItemType Directory -Force -Path $SqliteHome | Out-Null
-    if (!(Get-Command codex -ErrorAction SilentlyContinue)) {
-        throw "Codex CLI is required to initialize the shared SQLite session index."
+    if (!$RefreshInventory -and (Test-Path -LiteralPath (Join-Path $SqliteHome 'state_5.sqlite')) -and
+        (Test-Path -LiteralPath (Join-Path $SqliteHome 'thread_history_1.sqlite'))) {
+        Write-Host 'Existing shared SQLite history is preserved; no migration needed.'
+        return
+    }
+    $runtime = Get-CodexSharedRuntime -UiHome $ProfileHome
+    $python = Get-CodexSharedPython
+    & $python (Join-Path $PSScriptRoot 'seed-shared-sqlite.py') --ui-home $ProfileHome --destination $SqliteHome
+    if ($LASTEXITCODE -ne 0) { throw 'Could not preserve the existing desktop SQLite history.' }
+    if ($RefreshInventory -and (Test-Path -LiteralPath (Join-Path $SqliteHome 'state_5.sqlite'))) {
+        & $python (Join-Path $PSScriptRoot 'seed-shared-sqlite.py') --ui-home $ProfileHome --destination $SqliteHome --refresh-inventory
+        if ($LASTEXITCODE -ne 0) { throw 'Could not prepare native discovery of existing CLI conversations.' }
     }
 
     $oldCodexHome = $env:CODEX_HOME
     try {
-        $env:CODEX_HOME = $ProfileHome
+        # Native migrations acquire writer locks too. Use an isolated initializer
+        # while setup holds the real UI coordination lock against new writers.
+        $initializer = Join-Path $BackupRoot 'initializer'
+        New-Item -ItemType Directory -Path $initializer -Force | Out-Null
+        New-Item -ItemType Junction -Path (Join-Path $initializer 'sessions') -Target $SharedSessions | Out-Null
+        New-Item -ItemType Junction -Path (Join-Path $initializer 'archived_sessions') -Target $SharedArchived | Out-Null
+        $env:CODEX_HOME = $initializer
         $override = 'sqlite_home="' + $SqliteHome.Replace('\', '\\') + '"'
-        & codex -c $override migrate-rollouts --apply --json *> $null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Codex could not initialize the shared SQLite session index (exit code $LASTEXITCODE)."
+        $reportPath = Join-Path $BackupRoot 'initialize-report.json'
+        $errorPath = Join-Path $BackupRoot 'initialize-errors.log'
+        $previousEap = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & $runtime -c $override migrate-rollouts --apply --json 1> $reportPath 2> $errorPath
+            $migrationExit = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $previousEap }
+        if ($migrationExit -ne 0) {
+            throw "Codex could not initialize shared SQLite history (exit code $migrationExit). Original files were kept. See $reportPath and $errorPath."
         }
+        & $python (Join-Path $PSScriptRoot 'seed-shared-sqlite.py') --ui-home $ProfileHome --destination $SqliteHome --normalize-rollout-paths
+        if ($LASTEXITCODE -ne 0) { throw 'Could not finalize shared rollout paths.' }
     } finally {
         if ($null -eq $oldCodexHome) { Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue }
         else { $env:CODEX_HOME = $oldCodexHome }
     }
+}
+
+function Connect-SharedThreadWriterLocks {
+    param([string]$ProfileHome, [string]$LockHome, [string]$BackupHome)
+
+    $path = Join-Path $ProfileHome "thread-writer-locks"
+    if ([string]::Equals($path, $LockHome, [StringComparison]::OrdinalIgnoreCase)) { return }
+    if (Test-LinkTargetsDirectory -Path $path -ExpectedTarget $LockHome) { return }
+    if (Test-Path -LiteralPath $path) {
+        # Moving a lock file still in use would break coordination with its owner.
+        foreach ($file in Get-ChildItem -LiteralPath $path -File -Force) {
+            try {
+                $handle = [IO.File]::Open($file.FullName, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+                $handle.Dispose()
+            } catch { throw "Close the CLI using '$ProfileHome' before linking its writer locks." }
+        }
+        $resolved = [IO.Path]::GetFullPath($path)
+        $expected = [IO.Path]::GetFullPath((Join-Path $ProfileHome 'thread-writer-locks'))
+        if ($resolved -ne $expected) { throw "Unexpected writer lock path: $resolved" }
+        New-Item -ItemType Directory -Path $BackupHome -Force | Out-Null
+        Move-Item -LiteralPath $resolved -Destination (Join-Path $BackupHome 'thread-writer-locks')
+    }
+    New-Item -ItemType Junction -Path $path -Target $LockHome | Out-Null
 }
 
 $AccountCount = Resolve-AccountCount -Requested $AccountCount
@@ -258,10 +359,50 @@ $SharedArchived = Join-Path $CodexSharedHome "archived_sessions"
 $SharedHistory = Join-Path $CodexSharedHome "history.jsonl"
 $SharedSessionIndex = Join-Path $CodexSharedHome "session_index.jsonl"
 $SharedSqliteHome = Join-Path $CodexSharedHome "sqlite"
+$SharedWriterLocks = Join-Path $CodexUiHome "thread-writer-locks"
+New-Item -ItemType Directory -Path $SharedWriterLocks -Force | Out-Null
 
 New-Item -ItemType Directory -Force -Path $SharedSessions | Out-Null
 New-Item -ItemType Directory -Force -Path $SharedArchived | Out-Null
 New-Item -ItemType Directory -Force -Path $BackupRoot | Out-Null
+
+# Block new UI/shared-profile writers across the whole migration. Existing
+# writers are checked again below after this lock has been acquired.
+$coordinationPath = Join-Path $SharedWriterLocks '.coordination.lock'
+try {
+    $SetupCoordination = [IO.File]::Open($coordinationPath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::ReadWrite)
+    $SetupCoordination.Lock(0,1)
+} catch {
+    if ($SetupCoordination) { $SetupCoordination.Dispose(); $SetupCoordination = $null }
+    throw 'Another client is coordinating shared history. Wait for it to finish before setup.'
+}
+
+# Establish safety before copying a rollout, changing a database location, or
+# invoking a native migration. Already-configured profiles need no relinking.
+$requiresOfflineMerge = $false
+$expectedSqlite = 'sqlite_home = "' + $SharedSqliteHome.Replace('\','\\') + '"'
+foreach ($h in $Homes) {
+    $configPath = Join-Path $h 'config.toml'
+    $config = if (Test-Path -LiteralPath $configPath) { Get-Content -LiteralPath $configPath -Raw } else { '' }
+    $top = [regex]::Split([string]$config, '(?m)^\s*\[')[0]
+    $configMatches = [regex]::Matches($top, '(?m)^\s*sqlite_home\s*=.*$')
+    $changesHome = ($configMatches.Count -ne 1 -or $configMatches[0].Value.Trim() -ne $expectedSqlite)
+    foreach ($child in @('sessions','archived_sessions')) {
+        $path = Join-Path $h $child
+        if (!(Test-LinkTargetsDirectory -Path $path -ExpectedTarget (Join-Path $CodexSharedHome $child))) {
+            $changesHome = $true
+            if ((Test-Path -LiteralPath $path) -and @(Get-ChildItem -LiteralPath $path -File -Recurse -Force).Count -gt 0) { $requiresOfflineMerge = $true }
+        }
+    }
+    if ($changesHome) { Assert-NoActiveProfileWriter -ProfileHome $h }
+}
+if ($requiresOfflineMerge -or !(Test-Path -LiteralPath (Join-Path $SharedSqliteHome 'state_5.sqlite'))) {
+    foreach ($h in $Homes) { Assert-NoActiveProfileWriter -ProfileHome $h }
+}
+foreach ($h in $Homes) {
+    New-Item -ItemType Directory -Path $h -Force | Out-Null
+    Connect-SharedThreadWriterLocks -ProfileHome $h -LockHome $SharedWriterLocks -BackupHome (Join-Path $BackupRoot (Split-Path $h -Leaf))
+}
 
 Write-Host "Configured CLI accounts: $AccountCount"
 Write-Host "Backup folder: $BackupRoot"
@@ -362,7 +503,7 @@ if (!(Test-Path $SharedSessionIndex)) {
 # The current picker reads the SQLite thread inventory in addition to the
 # rollout files. Build that inventory from the shared rollouts, then point
 # every profile at the same sqlite_home so UI and CLI discover the same rows.
-Initialize-SharedSqliteState -ProfileHome $CodexUiHome -SqliteHome $SharedSqliteHome
+Initialize-SharedSqliteState -ProfileHome $CodexUiHome -SqliteHome $SharedSqliteHome -RefreshInventory:$requiresOfflineMerge
 foreach ($h in $Homes) {
     Set-SharedSqliteHomeConfig -ProfileHome $h -SqliteHome $SharedSqliteHome
 }
@@ -377,13 +518,13 @@ foreach ($h in $Homes) {
     $sessionIndex = Join-Path $h "session_index.jsonl"
 
     if (!(Test-LinkTargetsDirectory -Path $sessions -ExpectedTarget $SharedSessions)) {
-        Remove-PathWithoutFollowingJunction -Path $sessions
+        Move-ProfileSessionPathToBackup -Path $sessions
         New-Item -ItemType Junction -Path $sessions -Target $SharedSessions | Out-Null
         Write-Host "Linked sessions: $h"
     }
 
     if (!(Test-LinkTargetsDirectory -Path $archived -ExpectedTarget $SharedArchived)) {
-        Remove-PathWithoutFollowingJunction -Path $archived
+        Move-ProfileSessionPathToBackup -Path $archived
         New-Item -ItemType Junction -Path $archived -Target $SharedArchived | Out-Null
         Write-Host "Linked archived_sessions: $h"
     }
@@ -403,13 +544,19 @@ foreach ($h in $Homes) {
         New-Item -ItemType HardLink -Path $sessionIndex -Target $SharedSessionIndex | Out-Null
         Write-Host "Linked session_index.jsonl: $h"
     }
+
+    Connect-SharedThreadWriterLocks -ProfileHome $h -LockHome $SharedWriterLocks -BackupHome (Join-Path $BackupRoot (Split-Path $h -Leaf))
 }
+
+$SetupCoordination.Dispose()
+$SetupCoordination = $null
 
 Write-Host ""
 Write-Host "Done. codex1..codex$AccountCount and codexui now share live local sessions/history."
 Write-Host "Existing auth.json files were not removed, copied, linked, or replaced."
 Write-Host "Already-correct links were kept in place; newly added profiles were attached to the shared store."
 Write-Host "No periodic copy-sync job is needed: the profiles point at the same session store."
+Write-Host "Writer locks are shared too. Use one active writer per chat; close that chat in the other client before continuing it."
 Write-Host ""
 Write-Host "Use a new PowerShell window, then:"
 Write-Host "  codex1 resume --all"

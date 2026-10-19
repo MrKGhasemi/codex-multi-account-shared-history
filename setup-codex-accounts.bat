@@ -63,6 +63,7 @@ for /f "usebackq delims=" %%N in (`powershell.exe -NoLogo -NoProfile -Command "$
 echo.
 echo [2/3] Merging history and creating/updating shared live links...
 echo Force mode: no close-session pause. Existing correct links are left in place.
+echo Active writers still block unsafe merges or link changes.
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\windows\use-live-shared-history.ps1" -AccountCount %ACCOUNT_COUNT% -Force
 if errorlevel 1 goto :failed
 
@@ -112,6 +113,12 @@ set "CODEX_HOME="
 
 :skip_login
 echo.
+if exist "%LOCALAPPDATA%\OpenAI\Codex\bin" (
+    echo Checking saved message history. Recovery waits safely for existing writers to close.
+    powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%USERPROFILE%\.codex-switcher\repair-shared-history.ps1" -Background
+    if errorlevel 1 goto :failed
+)
+echo.
 echo Checking the final setup...
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\windows\check-codex-profiles.ps1" -AccountCount %ACCOUNT_COUNT%
 
@@ -132,7 +139,9 @@ echo The SQLite thread index is shared too, so the UI and CLI use the same picke
 echo This is a one-time setup for the configured profiles. New session changes
 echo are shared automatically after restarting the other client; do not rerun
 echo this file for normal UI/CLI use.
-echo The UI and a CLI profile must use the same account to show the same chats.
+echo Thread writer locks are shared across accounts. Use one active writer per chat.
+echo Helpers verify shared storage on every launch and stop if it changes.
+echo Close the chat in the other client before continuing it to avoid conflicting writes.
 echo Resume helpers automatically include desktop-created sessions for every profile:
 echo   codex1 resume --all
 if %ACCOUNT_COUNT% GTR 1 echo   ... through codex%ACCOUNT_COUNT% resume --all
