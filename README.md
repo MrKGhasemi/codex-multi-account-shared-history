@@ -1,418 +1,103 @@
 # Codex Multi-Account Shared History Switcher
 
-Use **any practical number of Codex CLI / ChatGPT logins on one machine** while keeping every login separate and sharing the same local Codex conversation history.
+Run multiple Codex CLI profiles on one machine with separate logins and a shared **local** chat history. On Windows, use the same local history from Codex Desktop and check every configured CLI account's usage in Terminal or a browser.
 
-> This is a local helper project. It is not an official OpenAI product.
+This is an unofficial local utility. It does not create accounts, pool quotas, or sync ChatGPT web chats and account-owned cloud resources.
 
-On Windows, run:
+## Windows quick start
 
-```bat
-setup-codex-accounts.bat
-```
+Download or clone the **whole repository** and keep the BAT files alongside the `scripts/` directory. The BAT files are launchers and do not work on their own.
 
-The batch file asks how many accounts you want (1-99), then:
+| Launcher | What it does |
+| --- | --- |
+| [setup-codex-accounts.bat](setup-codex-accounts.bat) | Configures 1–99 CLI profiles, preserves existing Windows logins, and connects local history. |
+| [open-codex-limits.bat](open-codex-limits.bat) | Opens one PowerShell tab per configured CLI profile in a single Windows Terminal window and runs `/status`. |
+| [open-codex-dashboard.bat](open-codex-dashboard.bat) | Opens one browser dashboard with usage limits for all configured CLI profiles. It does not open or fork chats. |
 
-1. creates `.codex-plus-1` through `.codex-plus-N`
-2. configures each CLI profile to use its own file-backed `auth.json`
-3. installs `codex1` through `codexN` PowerShell commands
-4. merges existing local sessions into one shared store
-5. connects every profile to that shared store
-6. runs `codex login status` separately for each existing `CODEX_HOME` and preserves logged-in profiles
-7. offers login only for newly added/unlogged profiles
-8. prints a final status check
+Use Windows PowerShell and a filesystem that supports junctions and hardlinks, such as NTFS. Setup checks for Codex on PATH; if it is missing, it can offer to install it with npm. The dashboard, status launcher, and Windows history migration use the bundled Codex Python when available, or an installed Python 3.11 or newer. The status tab launcher additionally needs **Windows Terminal and Git**. The dashboard needs a browser, but does not require Windows Terminal or Git.
 
-It does **not** create ChatGPT accounts. You must already have the accounts you want to sign in with.
+### 1. Set up accounts and shared history
 
-## How it works
-
-For `N` accounts:
-
-```text
-Account 1 -> ~/.codex-plus-1
-Account 2 -> ~/.codex-plus-2
-...
-Account N -> ~/.codex-plus-N
-UI/default -> ~/.codex
-```
-
-Authentication stays separate:
-
-```text
-~/.codex-plus-1/auth.json
-~/.codex-plus-2/auth.json
-...
-~/.codex-plus-N/auth.json
-~/.codex/auth.json
-```
-
-Only local conversation data is shared:
-
-```text
-sessions/
-archived_sessions/
-history.jsonl
-session_index.jsonl
-sqlite/ (Windows)
-thread-writer-locks/ (Windows, canonical directory in ~/.codex)
-```
-
-The shared store is:
-
-```text
-~/.codex-shared-history
-```
-
-On Windows, every configured profile points at the same live session directories, session index, and SQLite thread inventory. On Windows, `sessions` and `archived_sessions` use directory junctions, while `history.jsonl` and `session_index.jsonl` use hardlinks. The profiles share a configured `sqlite_home` under `.codex-shared-history\sqlite`. The Linux scripts currently share rollout directories and command history through symbolic links; the Windows SQLite and writer-lock changes described here are not implemented by those Linux scripts.
-
-Because the profiles point to the same files, **there is no periodic copy-sync process**. New and resumed local sessions are written to shared storage; restart the other client to refresh its view.
-
-Run `setup-codex-accounts.bat` once for the desired account count. After it finishes, the links and PowerShell helpers persist across restarts; normal UI/CLI changes are written to the same shared store automatically. You only need to run setup again when adding accounts, repairing links, or intentionally changing the configuration.
-
-The Windows helpers check the UI and CLI storage links and UI SQLite configuration on every launch. If they have changed, the helper stops before starting Codex. Each launch explicitly selects the shared SQLite directory and the desktop engine, and rejects arguments that override that directory or select a remote app server. The installer adds these safeguards to both Windows PowerShell and PowerShell 7.
-
-First-time setup preserves the existing UI thread database and paginated message history before native migration. Existing shared databases are kept. When merging two copies of a rollout, setup accepts an identical file or an append-only extension; it stops on divergent contents instead of overwriting either conversation. Original profile folders are retained in the setup backup.
-
-The setup also places the session inventory in `.codex-shared-history\sqlite` through Codex's `sqlite_home` setting. This is required by current Codex releases: rollout files alone are insufficient for the resume picker. Close and reopen the desktop UI once after the first setup so it loads the shared SQLite state.
-
-## Security model
-
-New or unlogged CLI profiles are configured with:
-
-```toml
-cli_auth_credentials_store = "file"
-```
-
-That makes those Codex credentials live in the profile's own `CODEX_HOME/auth.json`. Existing file-backed profiles keep that behavior. If an already-existing profile is successfully logged in through a keyring/auto credential store, the installer preserves its current credential-store configuration rather than breaking that login. The scripts never intentionally copy, link, print, or commit `auth.json`.
-
-Treat every `auth.json` like a password.
-
-## Repository layout
-
-```text
-.
-├── setup-codex-accounts.bat
-├── README.md
-├── COMMANDS.md
-├── SECURITY.md
-├── .gitignore
-└── scripts
-    ├── windows
-    │   ├── install-codex-profiles.ps1
-    │   ├── use-live-shared-history.ps1
-    │   ├── check-codex-profiles.ps1
-    │   ├── test-codex-login.ps1
-    │   └── remove-old-copy-sync-block.ps1
-    └── linux
-        ├── install-codex-profiles.sh
-        ├── use-live-shared-history.sh
-        └── check-codex-profiles.sh
-```
-
-# Windows: easiest setup
-
-## 1. Run the batch file
-
-Double-click:
-
-```text
-setup-codex-accounts.bat
-```
-
-or from Command Prompt:
-
-```bat
-setup-codex-accounts.bat
-```
-
-Enter the number of accounts when prompted.
-
-You can also provide the count directly:
+Close Codex Desktop and any CLI or IDE sessions using this history before the first setup. Double-click the setup BAT and enter the total number of CLI profiles, or pass the count:
 
 ```bat
 setup-codex-accounts.bat 6
 ```
 
-The batch file checks for Codex CLI. If it is missing and `npm` is available, it can install `@openai/codex` after asking permission.
+The installer creates or reuses `%USERPROFILE%\.codex-plus-1` through `.codex-plus-N`. New or unlogged CLI profiles use separate file-backed credentials; existing Windows profiles with working keyring logins keep their credential-store configuration. Setup checks each login and offers sign-in for profiles it detects as missing a login. You can add accounts by rerunning setup with a larger total; the Windows installer does not silently shrink an existing profile set.
 
-## 2. Login
-
-The batch file checks each profile with `codex login status` under that profile's own `CODEX_HOME`. A successful existing login is **left untouched**. It also conservatively preserves an existing `auth.json` rather than automatically overwriting/relogging it if the status check fails. The browser login flow is offered only for profiles that are confirmed to need login.
-
-Example: if `codex1` through `codex4` are already logged in and you rerun the BAT with a total count of `5`, their existing authentication is preserved, only `.codex-plus-5` is added, all five profiles are connected to the shared history, and only `codex5` is offered for login. Existing file-backed logins keep their `auth.json`; an already-working keyring/auto-backed profile keeps its credential-store configuration instead of being forcibly switched and broken.
-
-For account 1 it temporarily uses:
-
-```text
-CODEX_HOME=%USERPROFILE%\.codex-plus-1
-```
-
-For account 2:
-
-```text
-CODEX_HOME=%USERPROFILE%\.codex-plus-2
-```
-
-and so on.
-
-If you skip login during setup, use PowerShell later:
+After setup and any history recovery finish, reopen Codex Desktop and open a new PowerShell window. Helpers are installed for Windows PowerShell and PowerShell 7:
 
 ```powershell
-$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-1"
-codex login
+codex1 resume --all      # use profile 1 and show saved sessions across directories
+codexaccount 2           # open profile 2
+codexui resume --all     # CLI using the default desktop profile
+codexsharedstatus        # inspect shared storage links, not account usage
+codex1 login status
+codex1 login             # sign in later, if you skipped it during setup
 ```
 
-Repeat with the desired account number.
+Both usage launchers read the saved count from `%USERPROFILE%\.codex-switcher\account-count.txt`. They cover `codex1` through `codexN`; the separate desktop login is not included. See [COMMANDS.md](COMMANDS.md) for more options.
 
-For a headless machine, Codex also supports device-code login:
+### 2. View native Codex status in tabs
 
-```powershell
-$env:CODEX_HOME="$env:USERPROFILE\.codex-plus-1"
-codex login --device-auth
+```bat
+open-codex-limits.bat
+open-codex-limits.bat -Account 3
+open-codex-limits.bat -PlanOnly
 ```
 
-Device-code login may need to be enabled for the ChatGPT account/workspace.
+Each tab opens an empty interactive session by default and runs `/status` after the composer is ready. It sends no model prompt and does not resume or fork a saved chat. If you start chatting, Codex can save the session. To create a fork of a randomly selected saved chat instead, run `open-codex-limits.bat -Fork`; that mode can add a saved fork per account.
 
-## 3. Use the profiles
+The launcher uses a read-only Codex session in an empty Git workspace under `%LOCALAPPDATA%\CodexAccountStatus`. It records trust for that dedicated workspace only and backs up the affected profile config. Complete any sign-in prompt yourself. If the installed TUI layout changes or the five-minute wait expires, type `/status` manually in the tab.
 
-Open a **new PowerShell window** after setup.
+### 3. Monitor usage in one browser dashboard
 
-Examples when you configured 6 accounts:
-
-```powershell
-codex1
-codex2
-codex3
-codex4
-codex5
-codex6
+```bat
+open-codex-dashboard.bat
 ```
 
-Generic form:
+The dashboard opens at the `http://127.0.0.1:<port>/` address printed by the launcher. It reads account and usage data through each profile's Codex app-server, without sending model prompts. It checks automatically about once a minute, and **به‌روزرسانی الآن** triggers a manual refresh. Refreshes do not overlap.
 
-```powershell
-codexaccount 6
-```
+- See each profile's signed-in ChatGPT email and plan when available.
+- See remaining percentages for the usage windows Codex returns, such as five-hour and weekly limits, with live countdowns and exact reset times. Dates are Gregorian with English digits; times use the browser's local timezone.
+- See the last successful check and whether values are stale or unavailable. A profile with a missing login or a failed read does not prevent other profiles from updating.
+- The responsive Persian interface uses a bundled [Vazirmatn font](scripts/windows/limits-dashboard/Vazirmatn-OFL.txt) and respects the system's reduced-motion preference.
 
-Resume from the shared session list:
+Quota reset times do not indicate when a subscription ends. The dashboard is local, shows email addresses when available, and does not write a dashboard history file. Keep the launcher window open while monitoring. Press **Ctrl+C in that window** to stop the server; closing the browser tab alone does not stop it. If the browser does not open, visit the printed address manually.
 
-```powershell
-codex1 resume --all
-codex6 resume --all
-codexui resume --all
-```
+## How local sharing works
 
-Check everything:
+On Windows the desktop profile (`%USERPROFILE%\.codex`) and CLI profiles share local session and archive directories, the session index, SQLite history, and native writer locks. Command history is shared by default. Storage lives under `%USERPROFILE%\.codex-shared-history`, with the canonical writer-lock directory in the desktop profile. The clients use the same files directly; no background copy-sync job is required.
 
-```powershell
-codexsharedstatus
-```
+Managed CLI helpers check the shared links and database settings before launch. They use the installed desktop engine when available and add the flags needed to include non-interactive sessions in the resume picker. A restart of the other client may be needed to refresh its view. Local sharing does not require the same login on every client. However, local transcripts are visible from the configured profiles, so do not use this setup to separate confidential chats between accounts.
 
-or:
+Use **one active writer per chat**. If Codex reports an active writer, close the chat in the other client before continuing. Setup's `-Force` skips the interactive pause but does not override active-writer checks. If setup finds two divergent copies of a rollout at the same path, it stops rather than choosing one to overwrite.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\check-codex-profiles.ps1
-```
+Windows setup preserves the existing SQLite history where available. It stores replaced paths and migration reports under `%USERPROFILE%\codex-backup-before-shared-links-*`. With the desktop engine installed, the setup BAT can queue a one-time recovery for damaged local history. Close active writers, wait for `Recovery complete` in `%USERPROFILE%\.codex-switcher\history-recovery.log`, then reopen Codex. Check `history-recovery-errors.log` if it fails. Keep the setup and recovery backups private. For rollback, close Codex and use the matching backups for the paths and configuration you intend to restore; do not recursively delete through live links.
 
-# Windows: manual / scripted setup
+## Linux support
 
-Install or change the account count:
+The [Linux scripts](scripts/linux/) provide Bash helpers and symlink the session and archive directories and, optionally, command history. They do not implement the Windows BAT launchers, shared SQLite inventory, coordinated writer locks, or recovery. The scripts use Linux utilities (including `readlink -f`); macOS compatibility is not claimed. Back up local history and close Codex clients before running the Linux sharing script. See [COMMANDS.md](COMMANDS.md) for the Bash commands.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-codex-profiles.ps1 -AccountCount 8
-```
+## Before publishing to GitHub
 
-Enable shared live history without an interactive close-session pause:
+Publish the source files: the three BAT launchers, `scripts/`, `tests/`, the documentation and `.gitignore`. Keep the font and its license together. Never upload real profile directories, `auth.json`, chat/session data, local SQLite files, recovery backups, or `.diagnostics/`. Screenshots and diagnostics can contain account emails and chat text.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\use-live-shared-history.ps1 -AccountCount 8 -Force
-```
+When using Git, review `git status --short --ignored` and `git diff --cached --name-only` before committing. When uploading in a browser or making a ZIP, exclude private files manually: `.gitignore` only affects Git and does not remove files already tracked. See [SECURITY.md](SECURITY.md).
 
-Share the session directories without linking `history.jsonl`:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\use-live-shared-history.ps1 -AccountCount 8 -NoHistoryLink
-```
-
-The selected count is saved at:
-
-```text
-%USERPROFILE%\.codex-switcher\account-count.txt
-```
-
-Later runs can omit `-AccountCount`; the scripts reuse the saved value.
-
-## Changing the number of accounts
-
-Re-run the batch file and enter the new count, or re-run the installer with another `-AccountCount`.
-
-Increasing the count is additive: it creates only the missing profile homes/helper commands. Existing profile directories, existing `auth.json` files, and existing correct shared-history links are preserved.
-
-By default, Windows setup also refuses to silently shrink below the saved/discovered highest profile number. This protects an existing `codex1`...`codexN` setup from being accidentally unmanaged. The low-level installer supports `-AllowDecrease` if you intentionally want a smaller managed helper set; even then it does **not** delete profile directories or `auth.json`.
-
-# Linux / macOS-like shells
-
-Install for a specific number of accounts:
-
-```bash
-bash ./scripts/linux/install-codex-profiles.sh 6
-source "$HOME/.codex-switcher/codex-functions.sh"
-```
-
-Login:
-
-```bash
-CODEX_HOME="$HOME/.codex-plus-1" codex login
-CODEX_HOME="$HOME/.codex-plus-2" codex login
-# repeat through the configured count
-```
-
-Enable shared live history:
-
-```bash
-bash ./scripts/linux/use-live-shared-history.sh --accounts 6
-```
-
-Or, after the count has been saved by the installer:
-
-```bash
-bash ./scripts/linux/use-live-shared-history.sh
-```
-
-Check the setup:
-
-```bash
-bash ./scripts/linux/check-codex-profiles.sh
-```
-
-Use:
-
-```bash
-codex1
-codex6
-codexaccount 6
-codexui
-codexsharedstatus
-```
-
-# Concurrency warning
-
-Do not modify the **same conversation** from two profiles at the same time.
-
-All configured profiles share the same live local session files. On Windows, the shared native writer locks refuse a second writer for an already-open chat. Exit or close that chat in one client before continuing it through another account. The Linux scripts do not yet install this writer coordination.
-
-# Backups and rollback
-
-The shared-history scripts create a timestamped backup before replacing local session folders. The folder looks like:
-
-```text
-codex-backup-before-shared-links-YYYYMMDD-HHMMSS
-```
-
-To roll back:
-
-1. close all Codex processes
-2. remove the linked/junction `sessions`, `archived_sessions`, and linked `history.jsonl` entries from the profiles
-3. restore the desired data from the timestamped backup
-4. remove or reinstall the marked switcher block in your shell profile
-
-Do **not** delete an `auth.json` unless you intentionally want to remove that profile's local login.
-
-# Troubleshooting
-
-## `codexN` is not recognized
-
-Open a new PowerShell window after running the installer.
-
-Or reload your profile:
-
-```powershell
-. $PROFILE
-```
-
-## PowerShell execution policy blocks a script
-
-Use a one-run bypass:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-codex-profiles.ps1 -AccountCount 4
-```
-
-The provided `.bat` already uses a one-process execution-policy bypass for its helper scripts.
-
-## Force mode / locked files
-
-The BAT now calls the sharing script with `-Force` and does **not** stop at a “close Codex” pause. It also leaves already-correct junctions/hardlinks in place, so adding a new account normally touches only the new profile.
-
-`-Force` skips the interactive pause; it cannot bypass writer safety. Setup holds the native coordination lock and refuses to merge or move a store with an active writer. Close the affected UI/CLI chats and rerun if setup reports an active writer. On some managed Windows machines, junction/hardlink creation may also be restricted by policy.
-
-## Login is going into the wrong profile
-
-Check `CODEX_HOME` before running `codex login`:
-
-```powershell
-$env:CODEX_HOME
-```
-
-For account 3 it should be:
-
-```text
-%USERPROFILE%\.codex-plus-3
-```
-
-## Deleted conversations return
-
-If you used an older copy/merge version of this project, remove the old marked block and reinstall:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\remove-old-copy-sync-block.ps1
-```
-
-Then re-run the live-history script.
-
-# Notes
-
-This project shares **local Codex history**, not remote ChatGPT web conversation history. It does not merge accounts, subscriptions, workspaces, entitlements, or credentials.
-
-### Desktop projects are not CLI resume entries
-
-The Codex desktop app and the Codex CLI write different session sources. Desktop sessions commonly have metadata such as `source: "vscode"` and `originator: "Codex Desktop"`. The default CLI resume picker can omit those sessions even when their files are present in the shared `sessions` directory. Use the current CLI's opt-in flag when checking the complete local store:
-
-```powershell
-codexui resume --all --include-non-interactive
-```
-
-The Windows resume helpers add `--include-non-interactive` and `--no-daemon`, and use the installed desktop engine when available. Local chats can be shared between separately authenticated profiles; matching accounts is not required for this local store. Account-owned remote resources remain separate.
-
-### Saved messages disappear after restart
-
-Sharing rollout folders and the picker database is insufficient if each profile has independent `thread-writer-locks`. Two clients can then write the same chat with duplicate or regressed rollout ordinals. Codex skips those records when projecting paginated history, so messages can exist on disk while disappearing from the visible chat.
-
-The Windows setup now links every CLI's writer-lock directory to the desktop's existing lock directory. It also uses the desktop engine in the generated CLI helpers for storage format compatibility. Use one active writer per chat. Close that chat in the other client before continuing it; do not bypass a writer-lock error.
-
-For existing damaged history, setup installs and queues a single recovery worker. It waits until all UI/CLI thread writers close, saves SQLite snapshots and original rollouts, restores missing older cached history, and rebuilds damaged threads through Codex's native migration in an isolated staging store before publishing the repair. It preserves chat IDs and does not change authentication. Close Codex and the CLI sessions once, allow recovery to finish, then reopen them. Setup uses the desktop bundled Python, or an installed Python 3.11 or newer.
-
-Recovery status is recorded in `%USERPROFILE%\.codex-switcher\history-recovery.log`; errors are in `history-recovery-errors.log`. A successful run ends with `Recovery complete`. Backups are under `history-recovery-backup-*` alongside the log. Do not reopen a writer while recovery is in progress. No recurring copy or recovery job is installed.
-
-### Switching the account in the desktop UI
-
-Authentication stays separate from the shared local session files and databases. Switching accounts does not delete those shared local files. This setup does not transfer remote project ownership, subscriptions, or credentials between accounts.
-
-## Regression checks (Windows)
-
-Run the launch-guard tests in Windows PowerShell and PowerShell 7:
+## Windows regression checks
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\windows\shared-store.Tests.ps1
-pwsh -NoProfile -File .\tests\windows\shared-store.Tests.ps1
-```
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\windows\status-console.Tests.ps1
 
-Run the native history tests with the same desktop engine and bundled Python used by setup:
-
-```powershell
 . .\scripts\windows\shared-store.ps1
-$testPython = Get-CodexSharedPython
-$testRuntime = Get-CodexSharedRuntime
-& $testPython .\tests\windows\native-history.py --runtime $testRuntime
+$python = Get-CodexSharedPython
+$runtime = Get-CodexSharedRuntime
+& $python .\tests\windows\status-session.Tests.py
+& $python .\tests\windows\status-workspace.Tests.py
+& $python .\tests\windows\native-history.py --runtime $runtime
 ```
 
-These use isolated fixtures under `.diagnostics`, without credentials or model requests. They check saved messages after reopening both clients, recovery of regressed ordinals, refusal of concurrent writers, writer handoff after closing, preservation of cached history, and safe first-time setup including older CLI rollouts.
+The native history tests use isolated local fixtures, not your existing chats or credentials.

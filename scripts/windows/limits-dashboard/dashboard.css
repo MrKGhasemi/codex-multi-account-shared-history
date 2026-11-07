@@ -1,0 +1,51 @@
+@font-face{font-family:Vazirmatn;src:url('/Vazirmatn.woff2') format('woff2');font-weight:100 900;font-display:swap}
+:root{color-scheme:dark;--bg:#0b111b;--card:#141d2b;--line:#2a394d;--text:#f1f5f9;--muted:#aab9cd;--mint:#78ecc5;--amber:#ffc083}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 85% 0,#17413e 0,transparent 37rem),radial-gradient(ellipse at 0 35%,#1b2443 0,transparent 42rem),var(--bg);color:var(--text);font-family:Vazirmatn,"Segoe UI",Tahoma,sans-serif}
+main{max-width:1280px;margin:auto;padding:54px clamp(18px,5vw,60px)}
+header{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:22px;border:1px solid #40605e;border-radius:22px;padding:clamp(20px,4vw,36px);background:linear-gradient(120deg,#19273b,#172f32);box-shadow:0 16px 36px #060b1438}
+h1{font-size:clamp(2rem,5vw,3.3rem);margin:.3em 0 .2em}
+p,small,footer{color:var(--muted);line-height:1.7}
+.eyebrow{color:var(--mint);font:700 .77rem Consolas,monospace;letter-spacing:.15em;direction:ltr;text-align:right}
+button{font:inherit;font-weight:750;background:var(--mint);color:#10251f;border:0;border-radius:12px;padding:11px 17px;cursor:pointer;transition:box-shadow .2s,transform .2s}
+button:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 6px 22px #78ecc54d}
+.refresh-icon{display:inline-block;margin-inline-end:4px}
+.busy .refresh-icon{animation:spin .9s linear infinite}
+button:disabled{opacity:.58;cursor:wait}
+button:focus-visible{outline:3px solid white;outline-offset:4px}
+.overview,.grid{display:grid;gap:14px}.overview{grid-template-columns:repeat(3,1fr)}
+.overview>div,.card{background:linear-gradient(155deg,#192637,var(--card));border:1px solid var(--line);border-radius:16px;padding:18px}
+.overview>div{border-block-start-color:#4c6f73}
+.card{box-shadow:0 8px 24px #070c1540;transition:border-color .2s,transform .2s}
+.card:hover{border-color:#507d7a;transform:translateY(-2px)}
+.card.enter{animation:arrive .35s ease-out both}
+.overview strong{display:block;margin-top:6px;font-size:1.5rem}
+.grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,275px),1fr))}
+.top,.meter{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.top h2{font:700 1.12rem Consolas,monospace;margin:0;direction:ltr}
+.badge{border-radius:999px;background:#203a36;color:var(--mint);padding:4px 9px;font-size:.72rem}
+.identity{display:grid;gap:2px;margin:12px 0 4px;padding:10px 12px;border-radius:10px;background:#0e1824}
+.identity small{font-size:.74rem}
+.identity bdi{justify-self:start;font-size:.86rem;overflow-wrap:anywhere;min-width:0}
+.stale,.notice{color:var(--amber)}.stale{background:#3a2c20}
+.bucket{margin-top:16px;color:var(--muted);font-size:.82rem}
+.meter{margin:12px 0 5px;font-size:.87rem}
+.meter-title{min-width:0}
+.meter strong{flex-shrink:0}
+.reset-countdown{color:var(--muted);font-size:.78rem}
+.track{height:8px;border-radius:999px;background:#2a394b;overflow:hidden}
+.fill{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#3ab896,var(--mint));transform-origin:right;animation:fill-in .5s cubic-bezier(.2,.8,.2,1) both}
+.low .fill{background:linear-gradient(90deg,#f09664,var(--amber))}
+.reset,.updated{display:block;font-size:.73rem;margin-top:5px}.updated{margin-top:16px}
+.updated{border-top:1px solid var(--line);padding-top:10px}
+time{display:inline-block;font-variant-numeric:tabular-nums;color:#d6e0eb}
+#state::before{content:"";display:inline-block;width:7px;height:7px;background:var(--mint);border-radius:50%;margin-inline-end:8px}
+#state[data-phase="loading"]::before{animation:pulse 1.25s ease-in-out infinite}
+#state[data-phase="offline"]::before{background:var(--amber)}
+.notice{font-size:.83rem}footer{margin-top:28px;font-size:.8rem}
+@keyframes arrive{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fill-in{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{50%{opacity:.4;box-shadow:0 0 0 4px #78ecc525}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}button:hover:not(:disabled),.card:hover{transform:none}}
+@media(max-width:500px){main{padding-top:28px}.overview>div{padding:10px}.overview strong{font-size:1.1rem}}

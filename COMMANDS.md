@@ -16,6 +16,29 @@ setup-codex-accounts.bat 6
 
 ## Windows: manual PowerShell
 
+Open the local usage dashboard for all configured accounts:
+
+```bat
+open-codex-dashboard.bat
+```
+
+It shows email, plan, remaining quota, and reset countdowns when available. It refreshes about once a minute and offers a manual refresh button. Press Ctrl+C in the launcher window to stop monitoring.
+
+Open a tab for every configured account with automatic `/status`:
+
+```bat
+open-codex-limits.bat
+```
+
+Open only account 3, or preview all tabs:
+
+```bat
+open-codex-limits.bat -Account 3
+open-codex-limits.bat -PlanOnly
+```
+
+Each status tab starts an empty session by default. Pass `-Fork` to fork a random saved chat instead. The viewer uses an empty, helper-created Git workspace; only that workspace is registered as trusted, with a config backup. Git is required. Complete any login prompts in the corresponding tab; after a five-minute timeout, enter `/status` manually.
+
 Configure six account profiles:
 
 ```powershell
@@ -74,7 +97,7 @@ codex2 login status
 codexui login status
 ```
 
-## Linux / macOS-like shells
+## Linux (Bash)
 
 Configure six accounts:
 
@@ -94,6 +117,8 @@ Enable live sharing:
 ```bash
 bash ./scripts/linux/use-live-shared-history.sh --accounts 6
 ```
+
+Close Codex clients and back up local history first. The Linux scripts share session folders and command history, without the Windows SQLite inventory and writer-lock safeguards.
 
 Check:
 
@@ -121,4 +146,4 @@ If `codex1` through `codex4` already have `auth.json`, run:
 setup-codex-accounts.bat 5
 ```
 
-The setup preserves accounts 1-4, adds account 5, shares history across all five, and offers login only for account 5.
+The setup preserves the existing credential files, adds account 5, and connects the five profiles to shared history. It offers login for profiles it detects as missing a login.
