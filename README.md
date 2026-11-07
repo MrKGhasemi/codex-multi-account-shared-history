@@ -62,6 +62,13 @@ The dashboard opens at the `http://127.0.0.1:<port>/` address printed by the lau
 - See each profile's signed-in ChatGPT email and plan when available.
 - See remaining percentages for the usage windows Codex returns, such as five-hour and weekly limits, with live countdowns and exact reset times. Dates are Gregorian with English digits; times use the browser's local timezone.
 - See the last successful check and whether values are stale or unavailable. A profile with a missing login or a failed read does not prevent other profiles from updating.
+- Sort accounts by profile number, nearest five-hour reset, or nearest weekly reset. Accounts without an upcoming reset for the selected window appear last.
+- See the available Codex reset credit count reported by the usage response. The dashboard refreshes it with the quotas, distinguishes zero from unavailable, and never redeems credits.
+- Search by profile number, alias, or visible email. Filter for accounts ready to use, blocked, with available reset credits, or needing sign-in. Readiness comes from Codex's explicit usage response, not the quota percentage or countdown.
+- Refresh just one profile with the button on its card or table row. Switch between cards and a compact table, name profiles with aliases, and hide emails on screen. Display preferences are saved in this browser; hiding emails does not remove them from the local API.
+- Enable recovery alerts to see a message when a later Codex read confirms a blocked account is usable again. Browser notifications also require browser permission. Keep the dashboard page open to receive alerts.
+
+Running the BAT again reopens the dashboard already listening on `127.0.0.1:47631`. If another service uses that port, the launcher reports the conflict. Stop an older dashboard version before starting this version.
 - The responsive Persian interface uses a bundled [Vazirmatn font](scripts/windows/limits-dashboard/Vazirmatn-OFL.txt) and respects the system's reduced-motion preference.
 
 Quota reset times do not indicate when a subscription ends. The dashboard is local, shows email addresses when available, and does not write a dashboard history file. Keep the launcher window open while monitoring. Press **Ctrl+C in that window** to stop the server; closing the browser tab alone does not stop it. If the browser does not open, visit the printed address manually.

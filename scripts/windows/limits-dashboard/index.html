@@ -22,6 +22,29 @@
       <div><small>به‌روزرسانی بعدی</small><strong id="countdown">—</strong></div>
     </section>
     <p id="state" role="status">در حال اتصال به مانیتور محلی…</p>
+    <section class="toolbar" aria-label="تنظیمات نمایش">
+    <label>جست‌وجو <input id="search" type="search" placeholder="شماره، نام یا ایمیل"></label>
+    <label>فیلتر
+      <select id="filter">
+        <option value="all">همهٔ حساب‌ها</option>
+        <option value="ready">آمادهٔ استفاده</option>
+        <option value="blocked">فعلاً غیرقابل استفاده</option>
+        <option value="credits">دارای کوپن</option>
+        <option value="login">نیاز به ورود</option>
+      </select>
+    </label>
+    <label for="sort">مرتب‌سازی
+      <select id="sort">
+        <option value="profile">شمارهٔ پروفایل</option>
+        <option value="300">نزدیک‌ترین بازنشانی ۵ ساعته</option>
+        <option value="10080">نزدیک‌ترین بازنشانی هفتگی</option>
+      </select>
+    </label>
+    <label>نمایش <select id="view"><option value="cards">کارت‌ها</option><option value="table">جدول فشرده</option></select></label>
+    <label><input id="hide-email" type="checkbox"> مخفی‌کردن ایمیل‌ها</label>
+    <label><input id="alerts" type="checkbox"> اعلان بازگشت سهمیه</label>
+    </section>
+    <p id="recovery" role="status" hidden></p>
     <section id="accounts" class="grid" aria-label="حساب‌ها"></section>
     <footer>به‌روزرسانی خودکار هر دقیقه · تاریخ میلادی و ساعت محلی مرورگر</footer>
   </main>

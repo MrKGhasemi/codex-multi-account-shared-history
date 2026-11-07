@@ -6,11 +6,19 @@ import json
 import os
 from pathlib import Path
 from queue import Empty, Queue
+import socket
 import subprocess
 import threading
 import time
+from urllib.error import URLError
+from urllib.request import urlopen
 import webbrowser
 
+DASHBOARD_PORT = 47631
+
+
+class LoginRequired(ValueError):
+    pass
 
 def read_limits(runtime, profile):
     if not profile.is_dir():
@@ -57,7 +65,7 @@ def read_limits(runtime, profile):
                         error = result['error']
                         message = str(error.get('message', '')).lower()
                         if any(s in message for s in ('auth', 'login', 'sign in', '401', '403')):
-                            raise ValueError('Check this profile’s ChatGPT login')
+                            raise LoginRequired('Check this profile’s ChatGPT login')
                         if error.get('code') == -32601:
                             raise ValueError('This Codex version does not support reading limits')
                         raise ValueError('Codex could not retrieve limits; try again')
@@ -70,16 +78,20 @@ def read_limits(runtime, profile):
             identity = {}
             try:
                 send('account/read', 2, {'refreshToken': False})
-                account = reply(2).get('account') or {}
+                account_info = reply(2)
+                account = account_info.get('account') or {}
                 email = account.get('email') if account.get('type') == 'chatgpt' else None
                 identity = {'email': email if isinstance(email, str) and email.strip() else None,
-                            'accountPlan': account.get('planType')}
+                            'accountPlan': account.get('planType'),
+                            'loginRequired': not account and account_info.get('requiresOpenaiAuth') is True}
             except ValueError:
                 pass  # Older engines can still provide limits without account metadata.
             try:
                 send('account/rateLimits/read', 3)
                 return dict(identity, **summarize(reply(3)))
             except ValueError as exc:
+                if isinstance(exc, LoginRequired):
+                    identity['loginRequired'] = True
                 return dict(identity, error=str(exc))
         finally:
             child.terminate()
@@ -101,9 +113,14 @@ def summarize(result):
                                 'reset': window.get('resetsAt')})
         if windows:
             output.append({'label': group.get('limitName') or key, 'windows': windows})
+    summary = result.get('rateLimitResetCredits') or {}
+    count = summary.get('availableCount')
+    data = {'plan': primary.get('planType'), 'groups': output,
+            'usageAllowed': result.get('ordinaryUsageAllowed') if type(result.get('ordinaryUsageAllowed')) is bool else None,
+            'resetCredits': count if type(count) is int and count >= 0 else None}
     if not output:
-        raise ValueError('No usage windows were returned for this account')
-    return {'plan': primary.get('planType'), 'groups': output}
+        data['error'] = 'No usage windows were returned for this account'
+    return data
 
 
 class Monitor:
@@ -114,18 +131,25 @@ class Monitor:
         self.wake = threading.Event()
         self.stop = threading.Event()
         self.running = False
+        self.pending = set()
+        self.active = set()
+        self.confirmed = {}
         self.next = time.time()
 
-    def request(self):
+    def request(self, number=None):
         with self.lock:
-            if self.running or self.wake.is_set():
+            targets = set(self.rows) if number is None else {number}
+            queued = targets - self.active - self.pending
+            self.pending.update(queued)
+            if not queued:
                 return False
             self.wake.set()
             return True
 
     def snapshot(self):
         with self.lock:
-            return {'running': self.running or self.wake.is_set(), 'next': self.next,
+            return {'running': self.running or bool(self.pending), 'next': self.next,
+                    'busyAccounts': sorted(self.active | self.pending),
                     'accounts': [dict(row) for row in self.rows.values()]}
 
     def update(self, number):
@@ -139,22 +163,39 @@ class Monitor:
         with self.lock:
             row = self.rows[number]
             if 'email' in changes and row.get('email') != changes['email']:
-                for key in ('groups', 'updated', 'plan'):
+                self.confirmed.pop(number, None)
+                for key in ('groups', 'updated', 'plan', 'resetCredits', 'recoveredAt'):
                     row.pop(key, None)
+            changes.setdefault('usageAllowed', None)
+            if not changes.get('error'):
+                changes.setdefault('loginRequired', False)
+            if type(changes['usageAllowed']) is bool:
+                if changes['usageAllowed'] and self.confirmed.get(number) is False:
+                    changes['recoveredAt'] = time.time()
+                self.confirmed[number] = changes['usageAllowed']
+            changes['resetCreditsStale'] = 'resetCredits' not in changes and row.get('resetCredits') is not None
             row.update(changes)
 
     def run(self):
         with ThreadPoolExecutor(max_workers=min(6, len(self.rows))) as pool:
             while not self.stop.is_set():
                 with self.lock:
-                    self.running = True
+                    started = time.time()
+                    automatic = started >= self.next
+                    targets = set(self.rows) if automatic else set(self.pending)
+                    self.pending.difference_update(targets)
+                    self.active = targets
                     self.wake.clear()
-                started = time.time()
-                list(pool.map(self.update, self.rows))
+                    self.running = bool(targets)
+                if not targets:
+                    self.wake.wait(max(0, self.next - time.time()))
+                    continue
+                list(pool.map(self.update, sorted(targets)))
                 with self.lock:
                     self.running = False
-                    self.next = max(time.time() + 1, started + 60)
-                self.wake.wait(max(0, self.next - time.time()))
+                    self.active.clear()
+                    if automatic or len(targets) == len(self.rows):
+                        self.next = max(time.time() + 1, started + 60)
 
 
 ASSETS = {'/': ('index.html', 'text/html'), '/dashboard.css': ('dashboard.css', 'text/css'),
@@ -162,7 +203,16 @@ ASSETS = {'/': ('index.html', 'text/html'), '/dashboard.css': ('dashboard.css', 
           '/Vazirmatn.woff2': ('Vazirmatn.woff2', 'font/woff2')}
 
 
-def serve(runtime, home, count, open_browser=True):
+class DashboardServer(ThreadingHTTPServer):
+    allow_reuse_address = os.name != 'nt'
+
+    def server_bind(self):
+        if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
+def serve(runtime, home, count, open_browser=True, port=DASHBOARD_PORT):
     monitor = Monitor(runtime, home, count)
     assets = Path(__file__).with_name('limits-dashboard')
 
@@ -185,6 +235,8 @@ def serve(runtime, home, count, open_browser=True):
                 return self.respond(403)
             if self.path == '/api/limits':
                 return self.respond(200, json.dumps(monitor.snapshot()).encode())
+            if self.path == '/api/health':
+                return self.respond(200, b'{"service":"codex-limits-dashboard"}')
             if self.path in ASSETS:
                 name, mime = ASSETS[self.path]
                 return self.respond(200, (assets / name).read_bytes(), mime)
@@ -194,11 +246,36 @@ def serve(runtime, home, count, open_browser=True):
             if (self.headers.get('Host') != host or self.headers.get('Origin') != origin
                     or self.headers.get('X-Limits-Refresh') != '1'):
                 return self.respond(403)
+            number = None
             if self.path != '/api/refresh':
-                return self.respond(404)
-            self.respond(202, json.dumps({'queued': monitor.request()}).encode())
+                prefix = '/api/refresh/'
+                suffix = self.path[len(prefix):]
+                if not self.path.startswith(prefix) or not suffix.isascii() or not suffix.isdigit() or len(suffix) > 2:
+                    return self.respond(404)
+                number = int(suffix)
+                if number not in monitor.rows:
+                    return self.respond(404)
+            self.respond(202, json.dumps({'queued': monitor.request(number)}).encode())
 
-    with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+    # A single fixed loopback listener acts as the instance lock. Only reopen
+    # a service that identifies itself as this dashboard.
+    try:
+        server = DashboardServer(('127.0.0.1', port), Handler)
+    except OSError:
+        existing = f'http://127.0.0.1:{port}/'
+        for _ in range(8):
+            try:
+                with urlopen(existing + 'api/health', timeout=.4) as response:
+                    if json.loads(response.read(256)).get('service') == 'codex-limits-dashboard':
+                        print(f'Codex limits dashboard already running: {existing}')
+                        if open_browser:
+                            webbrowser.open(existing)
+                        return
+            except (OSError, URLError, ValueError, AttributeError):
+                pass
+            time.sleep(.15)
+        raise SystemExit(f'Cannot start dashboard: localhost port {port} is unavailable.')
+    with server:
         host = f'127.0.0.1:{server.server_port}'
         origin = f'http://{host}'
         worker = threading.Thread(target=monitor.run, daemon=True)
@@ -222,5 +299,6 @@ if __name__ == '__main__':
     parser.add_argument('--home', type=Path, required=True)
     parser.add_argument('--count', type=int, choices=range(1, 100), required=True)
     parser.add_argument('--no-browser', action='store_true')
+    parser.add_argument('--port', type=int, default=DASHBOARD_PORT, help='Loopback port (0 for an isolated test)')
     args = parser.parse_args()
-    serve(args.runtime, args.home, args.count, not args.no_browser)
+    serve(args.runtime, args.home, args.count, not args.no_browser, args.port)
